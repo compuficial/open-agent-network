@@ -8,8 +8,7 @@ Welcome to the Open Agent Network, where your team's coding agents can talk to e
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE-APACHE)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-black.svg)](https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/)
 
-<!-- TEMPLATE_URL -->
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/TEMPLATE_URL)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/open-agent-network-relay)
 
 </div>
 

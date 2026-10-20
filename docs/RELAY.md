@@ -41,36 +41,37 @@ Limit who can connect, if you want, with `iroh-relay`'s access controls to the r
 
 ## Railway (HTTPS only)
 
-Railway runs the container in [deploy/railway](../deploy/railway). The public edge terminates TLS on 443
-and forwards plain HTTP to the container's `PORT`. WebSocket connections, which is how iroh relays when
-it cannot use UDP, stay open. There is no inbound UDP, so the image does not advertise QUIC address
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/open-agent-network-relay)
+
+That button deploys the container in [deploy/railway](../deploy/railway). The public edge terminates TLS
+on 443 and forwards plain HTTP to the container's `PORT`. WebSocket connections, which is how iroh relays
+when it cannot use UDP, stay open. There is no inbound UDP, so the image does not advertise QUIC address
 discovery and does not bind UDP 7842.
 
 The image builds `iroh-relay` at the version locked next to `iroh` in `Cargo.lock` (1.3.0). It listens
 on `0.0.0.0:$PORT`, with metrics and QUIC turned off. `GET /healthz` returns JSON when the process is up.
-`railway.json` and `railway.toml` in that directory are the same service settings.
 
-Service settings for the template:
+The template sets the service. This table is the source of truth:
 
 | Setting | Value |
 | --- | --- |
-| Root directory | `deploy/railway` |
+| Root directory | `/deploy/railway` |
 | Dockerfile path | `Dockerfile` |
-| Config file | `railway.json` or `railway.toml` (same settings) |
 | Healthcheck path | `/healthz` |
-| Healthcheck timeout | 120 seconds |
+| Restart policy | `ON_FAILURE` |
 | Public port | 443 at Railway's edge. Do not publish UDP. |
 | Container port | The `PORT` Railway injects. The process binds it. Leave `PORT` unset in the variables UI. |
 | Required variables | None. `PORT` is injected. `RUST_LOG` is optional and only changes `iroh-relay` logs. |
+
+`railway.json` and `railway.toml` in that directory still describe the image, and the tests read them.
+Railway did not pick those files up when they were set as the config-file path. Railway is moving that
+configuration to `.railway/railway.ts`.
 
 Generate a Railway domain. The URL teammates use is `https://<name>.up.railway.app` (no port):
 
 ```sh
 oan init my-team --as alice --relay https://<name>.up.railway.app
 ```
-
-The README has a Deploy on Railway button. Its link is a placeholder until the template exists
-(`<!-- TEMPLATE_URL -->`).
 
 Peers who cannot reach each other directly relay over that HTTPS connection. It is slower than a VM
 that also publishes UDP 7842, and the relay still cannot read messages. A direct QUIC path is still
