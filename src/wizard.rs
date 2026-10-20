@@ -1,4 +1,5 @@
-//! The guided setup: what `reason network`, `reason network init`, `reason network join`, `reason network invite` and `reason network setup` do when a person
+//! The guided setup: what `oan`, `oan init`, `oan join`, `oan invite` and `oan setup` do when a person
+// Modified by compuficial, 2026.
 //! runs them in a terminal. Without a terminal (an agent running them), the commands use defaults and flags.
 
 use crate::{
@@ -33,11 +34,17 @@ fn name_ok(s: &str) -> Result<(), &'static str> {
 }
 
 fn invite_ok(s: &str) -> Result<(), &'static str> {
-    if crate::team::Ticket::is_ticket(s) || invite::normalize(s).is_some() {
+    if crate::team::Ticket::is_ticket(s) {
         Ok(())
+    } else if invite::normalize(s).is_some() {
+        Err("paste the long team link, not a four-word code")
     } else {
         Err("paste the team link your friend sent")
     }
+}
+
+fn relay_ok(s: &str) -> Result<(), &'static str> {
+    crate::fork::require_relay(Some(s)).map(|_| ()).map_err(|_| "an https:// address of your own relay")
 }
 
 fn ask_name() -> Result<String> {
@@ -49,7 +56,7 @@ fn ask_name() -> Result<String> {
 }
 
 /// Start or join a team. With an invite (a team link, from the installer), it only asks for your name.
-/// `start`: `Some(true)` from `reason network init`, `Some(false)` from `reason network join`, `None` to ask.
+/// `start`: `Some(true)` from `oan init`, `Some(false)` from `oan join`, `None` to ask.
 pub async fn onboard(
     start: Option<bool>,
     team: Option<String>,
@@ -81,10 +88,14 @@ pub async fn onboard(
             Some(t) => t,
             None => input("Name your team").placeholder("the boys").validate(|s: &String| name_ok(s)).interact()?,
         };
+        let relay: String = input("Your self-hosted relay")
+            .placeholder("https://relay.example.com")
+            .validate(|s: &String| relay_ok(s))
+            .interact()?;
         let sp = spinner();
         sp.start("Creating the team...");
         let t: TeamInfo = link
-            .call(Request::CreateTeam { name, person, relay: None, proof: None })
+            .call(Request::CreateTeam { name, person, relay: Some(relay), proof: None })
             .await
             .inspect_err(|e| sp.error(format!("{e:#}")))?;
         crate::wait_exit(crate::daemon_pid()).await;
@@ -94,10 +105,9 @@ pub async fn onboard(
         loop {
             let text: String = match invite.take() {
                 Some(t) => t,
-                None => input("Paste the team link")
-                    .placeholder("https://reasonmachines.com/network/join/#…")
-                    .validate(|s: &String| invite_ok(s))
-                    .interact()?,
+                None => {
+                    input("Paste the team link").placeholder("rn1-…").validate(|s: &String| invite_ok(s)).interact()?
+                }
             };
             let sp = spinner();
             sp.start("Joining...");
@@ -186,26 +196,27 @@ fn and_list(items: &[&str]) -> String {
     }
 }
 
-/// Which agents are on Reason Network, the background service, and how teammates' messages are handled.
+/// Which agents are on Open Agent Network, the background service, and how teammates' messages are handled.
 pub async fn agents_and_preferences() -> Result<()> {
     let exe = setup::exe()?;
     let found = setup::detect(&exe);
     let chosen: Vec<&str> = if found.is_empty() {
         log::warning(format!(
-            "No coding agents found here (Claude Code, Codex, Grok CLI, Cursor, Gemini CLI, Copilot CLI, opencode, pi, DeepSeek Harness, Reason). Install one, then run `{CLI} setup`."
+            "No coding agents found here (Claude Code, Codex, Grok CLI, Cursor, Gemini CLI, Copilot CLI, opencode, pi, DeepSeek Harness). Install one, then run `{CLI} setup`."
         ))?;
         Vec::new()
     } else {
         let initial: Vec<&str> = found.iter().filter(|f| f.wired).map(|f| f.id).collect();
-        let mut pick = multiselect("Which agents should be on Reason Network?  (space to toggle, enter to confirm)")
-            .required(false)
-            .initial_values(initial);
+        let mut pick =
+            multiselect("Which agents should be on Open Agent Network?  (space to toggle, enter to confirm)")
+                .required(false)
+                .initial_values(initial);
         for f in &found {
             pick = pick.item(f.id, f.name, f.hint);
         }
         pick.interact()?
     };
-    let service = confirm("Keep Reason Network running in the background, so teammates can always reach you?")
+    let service = confirm("Keep Open Agent Network running in the background, so teammates can always reach you?")
         .initial_value(true)
         .interact()?;
     let mut cfg = Config::load_strict().map_err(|e| anyhow!("fix {} first: {e}", crate::paths::config().display()))?;
@@ -218,7 +229,7 @@ pub async fn agents_and_preferences() -> Result<()> {
         .initial_value(cfg.share_paths)
         .interact()?;
     if cfg!(target_os = "macos") && service {
-        cfg.tray = confirm("Show Reason in the menu bar?").initial_value(cfg.tray).interact()?;
+        cfg.tray = confirm("Show Open Agent Network in the menu bar?").initial_value(cfg.tray).interact()?;
     }
     cfg.save()?;
 
@@ -252,7 +263,7 @@ pub async fn show_link(new: bool) -> Result<String> {
     note(
         title,
         format!(
-            "Send it as the invite line, Join the Reason Network: <link>: whoever pastes it to their agent joins.\nIt works for everyone until `{CLI} link --new`."
+            "Send it as the invite line, Join Open Agent Network: <link>: whoever pastes it to their agent joins.\nIt works for everyone until `{CLI} link --new`."
         ),
     )?;
     Ok(l.url)
@@ -296,7 +307,7 @@ pub fn copy(text: &str) -> bool {
     })
 }
 
-/// `reason network invite` in a terminal: the team link, or a one-time code for another machine of yours.
+/// `oan invite` in a terminal: the team link, or a one-time code for another machine of yours.
 pub async fn invite() -> Result<()> {
     intro(format!(" {CLI} invite "))?;
     let what = select("Who's joining?")
@@ -314,7 +325,7 @@ pub async fn invite() -> Result<()> {
     Ok(())
 }
 
-/// `reason network setup` in a terminal.
+/// `oan setup` in a terminal.
 pub async fn setup_agents() -> Result<()> {
     intro(format!(" {CLI} setup "))?;
     agents_and_preferences().await?;

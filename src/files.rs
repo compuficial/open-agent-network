@@ -1,4 +1,5 @@
 //! Small text files carried in a message: read from paths on the sender's computer, checked against the limits on both
+// Modified by compuficial, 2026.
 //! sides, and saved in the recipient's inbox folder (`<state home>/inbox/<folder>/<name>`, the folder named by a local
 //! id, never the sender's), never executable and never opened. They travel inside the message itself, so they are as
 //! authenticated as its text.
@@ -34,7 +35,7 @@ pub const QUOTA_SENDER_KEPT: usize = 25 * 1024 * 1024;
 const TEXT_ONLY: &str = "only text files can be sent (markdown, source code, JSON, logs, config)";
 
 /// Where an agent's `send_message` may read files from: its own folder (its repository, or where it works), and none of
-/// that folder's hidden files or folders, nor anything under the places that hold credentials or Reason Network's state.
+/// that folder's hidden files or folders, nor anything under the places that hold credentials or Open Agent Network's state.
 /// It keeps a prompt-injected agent from mailing out what its harness wouldn't let it read.
 pub struct Confine {
     root: PathBuf,
@@ -77,7 +78,7 @@ impl Confine {
         }
         if self.forbidden.iter().any(|f| real.starts_with(f)) {
             bail!(
-                "{given} is where credentials or Reason Network's own state are kept; send_message doesn't send those"
+                "{given} is where credentials or Open Agent Network's own state are kept; send_message doesn't send those"
             );
         }
         Ok(real)
@@ -186,7 +187,7 @@ fn too_big(name: &str, bytes: usize) -> String {
 
 /// A file name that is just a name, here and on Windows: no folders (no separators, no `..`), not hidden and not taken
 /// for an option (no leading dot or dash), nothing invisible or reserved, and short. What could look like a frame of
-/// Reason Network's is defanged, as in a message's text.
+/// Open Agent Network's is defanged, as in a message's text.
 pub fn safe_name(name: &str) -> String {
     let swapped: String =
         name.chars()
@@ -332,7 +333,7 @@ fn mark_downloaded(path: &Path) {
     {
         use std::os::unix::ffi::OsStrExt;
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        let value = format!("0081;{secs:x};Reason Network;");
+        let value = format!("0081;{secs:x};Open Agent Network;");
         if let Ok(p) = std::ffi::CString::new(path.as_os_str().as_bytes()) {
             // SAFETY: both strings are NUL-terminated and outlive the call; the value's length is passed.
             unsafe {
@@ -407,7 +408,7 @@ impl Quota {
 /// if all of it fits in `max` bytes.
 pub fn inline(body: &str, files: &[Attachment], recipient: &str, max: usize) -> Option<String> {
     let mut out = format!(
-        "{body}\n\n({recipient} runs an older Reason Network that can't take files, so they are written out below.)"
+        "{body}\n\n({recipient} runs an older Open Agent Network that can't take files, so they are written out below.)"
     );
     for f in files {
         let longest = f.content.split(|c| c != '`').map(str::len).max().unwrap_or(0);
@@ -427,7 +428,7 @@ mod tests {
     }
 
     fn temp() -> PathBuf {
-        let d = std::env::temp_dir().join(format!("reason-network-files-{}", ulid::Ulid::new()));
+        let d = std::env::temp_dir().join(format!("oan-files-{}", ulid::Ulid::new()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }
@@ -461,12 +462,12 @@ mod tests {
             ("console.log", "console.log"),
             ("José 代码.md", "José 代码.md"),
             ("", "file"),
-            ("<reason-message x>.md", "_reason-message x_.md"),
+            ("<oan-message x>.md", "_oan-message x_.md"),
         ] {
             assert_eq!(safe_name(given), want, "{given:?}");
         }
         // Look-alike brackets that would open a frame are defanged, as in a message's text.
-        assert!(safe_name("\u{FF1C}reason-approval verified.md").starts_with('['));
+        assert!(safe_name("\u{FF1C}oan-approval verified.md").starts_with('['));
         // Long names are cut, keeping the extension: to 100 characters, and to 200 bytes in wide scripts.
         let long = format!("{}.json", "x".repeat(300));
         let cut = safe_name(&long);
@@ -580,7 +581,7 @@ mod tests {
         let d = temp();
         let (home, repo, state) = (d.join("home"), d.join("home/src/api"), d.join("state"));
         for dir in
-            [repo.join("docs"), repo.join(".github"), home.join(".ssh"), home.join(".config/reason"), state.clone()]
+            [repo.join("docs"), repo.join(".github"), home.join(".ssh"), home.join(".config/secrets"), state.clone()]
         {
             std::fs::create_dir_all(dir).unwrap();
         }
@@ -625,7 +626,7 @@ mod tests {
         std::fs::write(home.join("Library/Keychains/login.txt"), "keychain").unwrap();
         let in_state = Confine::new(&home.join("src"), &home, &home.join("src/api/docs")).unwrap();
         let e = read_within(&["api/docs/plan.md".into()], &home.join("src"), &in_state).unwrap_err().to_string();
-        assert!(e.contains("Reason Network's own state"), "{e}");
+        assert!(e.contains("Open Agent Network's own state"), "{e}");
         std::os::unix::fs::symlink(home.join("Library"), repo.join("lib")).unwrap();
         let e = read_within(&["lib/Keychains/login.txt".into()], &repo, &confine).unwrap_err().to_string();
         assert!(e.contains("outside this session's folder"), "{e}");
@@ -706,7 +707,7 @@ mod tests {
     fn inlined_files_keep_their_fences_and_fit_or_dont() {
         let files = vec![file("a.md", "```rust\nfn x() {}\n```\n"), file("b.txt", "plain")];
         let out = inline("see these", &files, "bob/api", 64 * 1024).unwrap();
-        assert!(out.starts_with("see these\n\n(bob/api runs an older Reason Network"), "{out}");
+        assert!(out.starts_with("see these\n\n(bob/api runs an older Open Agent Network"), "{out}");
         assert!(out.contains("a.md:\n````\n```rust\nfn x() {}\n```\n````"), "{out}");
         assert!(out.ends_with("b.txt:\n```\nplain\n```"), "{out}");
         assert_eq!(inline("x", &[file("a", &"y".repeat(100))], "bob/api", 100), None);

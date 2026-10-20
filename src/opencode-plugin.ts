@@ -1,5 +1,5 @@
-// reason network for opencode: written by `reason network setup`, removed by `reason uninstall`.
-// Reports each session's busy/idle state and what it is doing (its title and todo in progress) to reason network, and
+// oan for opencode: written by `oan setup`, removed by `oan setup --remove`.
+// Reports each session's busy/idle state and what it is doing (its title and todo in progress) to oan, and
 // delivers teammates' messages into idle sessions, on opencode 1.x and 2.x.
 import type { Plugin } from "@opencode-ai/plugin"
 import { execFile } from "node:child_process"
@@ -75,7 +75,7 @@ const network = (prompt: (id: string, text: string) => Promise<unknown>) => {
   }
 }
 
-const ReasonNetwork: Plugin = async ({ client, directory }) => {
+const OpenAgentNetwork: Plugin = async ({ client, directory }) => {
   const last = new Map<string, { agent?: string; model?: { providerID: string; modelID: string } }>()
   const net = network((id, text) =>
     client.session.promptAsync({ path: { id }, body: { ...(last.get(id) ?? {}), parts: [{ type: "text", text }] } }),
@@ -115,8 +115,8 @@ const STATE: Record<string, string> = {
 
 // opencode 1.x calls `server`, 2.x calls `setup`.
 export default {
-  id: "reason-network",
-  server: ReasonNetwork,
+  id: "oan",
+  server: OpenAgentNetwork,
   setup: (ctx: any) => {
     // 1.x calls this too, with a context that has no events; it runs `server` instead.
     if (!ctx.event) return

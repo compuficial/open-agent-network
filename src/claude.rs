@@ -1,5 +1,6 @@
 //! Claude Code keeps one `~/.claude/sessions/<pid>.json` per live session (name, cwd, busy/idle). Reading them
-//! lists every Claude session on this machine, including ones that don't have Reason Network loaded.
+// Modified by compuficial, 2026.
+//! lists every Claude session on this machine, including ones that don't have Open Agent Network loaded.
 
 use crate::{agent::ClaudeSocket, paths, util};
 use serde::Deserialize;
@@ -52,7 +53,7 @@ impl ClaudeSession {
     }
 }
 
-/// Whether Reason Network is one of Claude Code's MCP servers here (`reason network setup` chose Claude Code). Read once: the
+/// Whether Open Agent Network is one of Claude Code's MCP servers here (`oan setup` chose Claude Code). Read once: the
 /// daemon restarts after setup.
 pub fn wired() -> bool {
     static WIRED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -69,11 +70,11 @@ pub fn wired() -> bool {
 }
 
 const HELD: &str = "held by Claude Code for its user's approval: the session skips permission prompts and has no \
-                    `reason-network mcp` of its own (restart it, or turn the server on in /mcp, and it takes messages \
+                    `oan mcp` of its own (restart it, or turn the server on in /mcp, and it takes messages \
                     straight away)";
 
 /// What to tell the sender of a message posted straight into a Claude Code session, when Claude Code will hold it. A
-/// session without a `reason-network mcp` of its own (open before setup, or its server turned off or crashed) can't
+/// session without a `oan mcp` of its own (open before setup, or its server turned off or crashed) can't
 /// post with its own token, so the post reaches it as a stranger's, and a session that skips permission prompts holds
 /// those for its user unless `crossSessionInbound` is `accept`. `None`: not known to be held (the mode is not in its
 /// transcript).
@@ -149,7 +150,7 @@ mod tests {
 
     #[test]
     fn the_last_permission_mode_in_the_transcript_counts() {
-        let dir = std::env::temp_dir().join(format!("reason-network-mode-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oan-mode-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("session.jsonl");
         let lines = [

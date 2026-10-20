@@ -1,5 +1,6 @@
-//! The local API between the daemon and its clients (`reason network mcp`, the CLI, hooks): one JSON object per line
-//! over `~/.Reason Network/Reason Network.sock`. Requests carry an `id` and get a [`Reply`] with the same id; a connection that
+//! The local API between the daemon and its clients (`oan mcp`, the CLI, hooks): one JSON object per line
+// Modified by compuficial, 2026.
+//! over `~/.Open Agent Network/Open Agent Network.sock`. Requests carry an `id` and get a [`Reply`] with the same id; a connection that
 //! registered sessions also receives [`Event`]s for them.
 
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,7 @@ pub enum Tier {
     Turn,
     /// Seen only when the agent checks its inbox.
     Pull,
-    /// Not on Reason Network: cannot receive.
+    /// Not on Open Agent Network: cannot receive.
     None,
 }
 
@@ -74,7 +75,7 @@ pub struct HookCall {
     /// What the session is doing, from agents that say so themselves (the opencode plugin).
     #[serde(default)]
     pub doing: Option<String>,
-    /// The session's name, for sessions that pick one (`reason network listen --as`).
+    /// The session's name, for sessions that pick one (`oan listen --as`).
     #[serde(default)]
     pub name: Option<String>,
 }
@@ -147,7 +148,7 @@ pub enum Request {
         key: String,
         ids: Vec<String>,
     },
-    /// An agent hook fired (`reason network hook`): keeps hook-only sessions alive and returns mail to inject.
+    /// An agent hook fired (`oan hook`): keeps hook-only sessions alive and returns mail to inject.
     Hook(HookCall),
     /// For agents whose MCP calls carry no session id (Cursor, opencode): the hook-known session of this agent
     /// that is most likely making the call.
@@ -160,7 +161,7 @@ pub enum Request {
         person: String,
         #[serde(default)]
         relay: Option<String>,
-        /// A Reason sign-in proof for this machine: then the name is the proof's.
+        /// A sign-in proof for this machine: then the name is the proof's.
         #[serde(default)]
         proof: Option<String>,
     },
@@ -170,7 +171,7 @@ pub enum Request {
         #[serde(default)]
         proof: Option<String>,
     },
-    /// Attach or refresh this machine's Reason sign-in proof.
+    /// Attach or refresh this machine's sign-in proof.
     Proof {
         jws: String,
     },
@@ -191,7 +192,7 @@ pub enum Request {
         who: String,
     },
     Leave {
-        /// Leave even if no teammate is online to hear it (they'll need to `reason network remove` this machine).
+        /// Leave even if no teammate is online to hear it (they'll need to `oan remove` this machine).
         #[serde(default)]
         force: bool,
     },
@@ -238,7 +239,7 @@ pub struct Reply {
     pub result: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// For a failure the Reason CLI handles: `name_taken` or `same_account_needs_owner` (see [`error_code`]).
+    /// For a failure the installer handles: `name_taken` or `same_account_needs_owner` (see [`error_code`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
 }
@@ -343,7 +344,7 @@ pub struct Directory {
     pub machine: String,
     pub machines: Vec<MachineInfo>,
     pub sessions: Vec<SessionInfo>,
-    /// `Join the Reason Network: <team link>`, for agents to pass on.
+    /// `Join Open Agent Network: <team link>`, for agents to pass on.
     #[serde(default)]
     pub invite_line: Option<String>,
 }
@@ -360,7 +361,7 @@ pub struct MachineInfo {
     pub rtt_ms: Option<u64>,
     pub last_seen: Option<i64>,
     /// The person is verified (it's per person, the same on each of their machines): a machine of theirs carries a
-    /// Reason sign-in proof for their name, good now.
+    /// sign-in proof for their name, good now.
     #[serde(default)]
     pub verified: bool,
     /// This machine carries such a proof itself.
@@ -370,7 +371,7 @@ pub struct MachineInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamInfo {
-    /// The team's id, 32 hex digits (the Reason CLI and connector route by it).
+    /// The team's id, 32 hex digits (the installer and connector route by it).
     #[serde(default, rename = "team_id")]
     pub id: String,
     pub name: String,
@@ -400,8 +401,7 @@ pub struct LinkInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteInfo {
-    /// Four words, like `plum-tiger-lake-orbit`. For a team with its own relay, the long form (a code would need n0's
-    /// address lookup to find this machine).
+    /// Four words, like `plum-tiger-lake-orbit`. This build does not issue them; use the team link.
     pub code: String,
     /// The same invite as a long `rn1-…` string, for when the inviting machine will be offline.
     pub ticket: String,

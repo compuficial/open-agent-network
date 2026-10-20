@@ -1,4 +1,5 @@
 //! The per-machine daemon: knows the live sessions here, talks to teammates' daemons, routes messages, keeps
+// Modified by compuficial, 2026.
 //! mailboxes. Split by concern: `sessions` (who is running here), `directory` (who is where, and resolving
 //! addresses), `mail` (sending, receiving, delivering), `teamops` (membership and the network).
 
@@ -6,7 +7,6 @@ mod ask;
 mod directory;
 mod mail;
 mod notify;
-mod reason;
 mod sessions;
 mod teamops;
 mod update;
@@ -38,7 +38,7 @@ use tokio::{
 const GIT_TTL: Duration = Duration::from_secs(30);
 const MAX_WAIT: u64 = 600;
 
-/// Runs the daemon. Only one runs per state folder (`REASON_NETWORK_HOME`): a second one exits, or with `service` waits its turn.
+/// Runs the daemon. Only one runs per state folder (`OAN_HOME`): a second one exits, or with `service` waits its turn.
 pub async fn run(service: bool) -> Result<()> {
     // Windows runs what starts at logon in a console window of its own: carry on in a hidden process instead.
     #[cfg(windows)]
@@ -63,12 +63,6 @@ pub async fn run(service: bool) -> Result<()> {
     // Normally the service's daemon; a daemon started some other way stands in for it while it runs.
     if daemon.cfg.tray() && (service || crate::setup::service_installed()) {
         tokio::spawn(tray());
-    }
-    if daemon.cfg.reason {
-        tokio::spawn(daemon.clone().reason_loop());
-    }
-    if crate::managed() {
-        tokio::spawn(daemon.clone().relay_loop());
     }
     tokio::spawn(crate::migrate::run(log));
     tokio::spawn(daemon.clone().relays_loop());
@@ -140,7 +134,7 @@ struct Inner {
 struct Live {
     reg: SessionReg,
     name: String,
-    /// The client connection (`reason network mcp`) that owns it; `None` for sessions known only through hooks.
+    /// The client connection (`oan mcp`) that owns it; `None` for sessions known only through hooks.
     conn: Option<u64>,
     git: GitInfo,
     doing: Option<String>,
@@ -322,14 +316,10 @@ impl Daemon {
         })
     }
 
-    /// Keeps Reason's relay list fresh, unless the team runs its own relay. A new list applies at the next start.
+    /// Does not fetch a relay list. The team's self-hosted relay is the only one used.
     async fn relays_loop(self: Arc<Self>) {
-        loop {
-            if self.team_state().is_none_or(|t| t.meta.body.relay.is_none()) {
-                crate::relays::refresh().await;
-            }
-            tokio::time::sleep(crate::relays::EVERY).await;
-        }
+        let _ = self;
+        crate::relays::refresh().await;
     }
 
     /// Exits shortly (after the reply goes out). The service manager, or the next client, starts a fresh

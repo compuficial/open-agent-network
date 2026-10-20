@@ -1,4 +1,5 @@
 //! SQLite: messages, and the sessions this machine has seen: live ones, ones gone for less than a day, and the
+// Modified by compuficial, 2026.
 //! person's own mailboxes (`cli`, such as `terminal`). Files that came with messages are saved in the inbox folder, one
 //! folder per message, and go with their message.
 
@@ -488,7 +489,7 @@ mod tests {
     #[cfg(unix)]
     fn the_database_is_this_users_and_keeps_nothing_it_deleted() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("reason-network-store-{}", ulid::Ulid::new()));
+        let dir = std::env::temp_dir().join(format!("oan-store-{}", ulid::Ulid::new()));
         std::fs::create_dir_all(&dir).unwrap();
         let db = dir.join("network.db");
         // A database made before, with the default mode.
@@ -564,7 +565,7 @@ mod tests {
     }
 
     fn temp_inbox() -> PathBuf {
-        std::env::temp_dir().join(format!("reason-network-inbox-{}", ulid::Ulid::new()))
+        std::env::temp_dir().join(format!("oan-inbox-{}", ulid::Ulid::new()))
     }
 
     fn file(name: &str, content: &str) -> Attachment {

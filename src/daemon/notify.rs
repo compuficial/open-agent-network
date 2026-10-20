@@ -1,4 +1,5 @@
 //! Desktop notifications, for a message that needs the person and not only their agent (`notify`). Shown with
+// Modified by compuficial, 2026.
 //! what the system has: osascript on macOS, notify-send on Linux, a toast from Windows PowerShell. Where there is
 //! nothing to show one with, the sender is told; people turn them off in their system's notification settings.
 
@@ -58,7 +59,7 @@ fn command(title: &str, body: &str) -> Option<Command> {
 fn command(title: &str, body: &str) -> Option<Command> {
     let mut cmd = notify_send()?;
     // `--` keeps a body starting with `-` from being taken for an option.
-    cmd.args(["--app-name=Reason Network".into(), "--".into(), markup(title), markup(body)]);
+    cmd.args(["--app-name=Open Agent Network".into(), "--".into(), markup(title), markup(body)]);
     Some(cmd)
 }
 

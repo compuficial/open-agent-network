@@ -1,4 +1,5 @@
 //! Who is where: this machine's sessions, teammates' sessions (from their presence), and resolving an address
+// Modified by compuficial, 2026.
 //! like `alice/api-cursor`, `repo:api` or `*` to recipients.
 
 use super::Daemon;
@@ -50,7 +51,7 @@ enum Place {
 }
 
 impl Daemon {
-    /// This machine's sessions: running ones, plus (if `unmanaged`) Claude Code sessions without Reason Network.
+    /// This machine's sessions: running ones, plus (if `unmanaged`) Claude Code sessions without Open Agent Network.
     pub(super) async fn local_rows(self: &Arc<Self>, me: Option<&str>, unmanaged: bool) -> Result<Vec<SessionInfo>> {
         let claude = tokio::task::spawn_blocking(claude::scan).await?;
         let mut cwds: Vec<String> = self.inner.lock().unwrap().live.values().map(|l| l.reg.cwd.clone()).collect();
@@ -61,8 +62,8 @@ impl Daemon {
             gits.insert(cwd, info);
         }
 
-        // With Claude Code on Reason Network, every open Claude session is on it: sessions started before Reason Network was set
-        // up have no Reason Network tools, but take messages through their own socket and reply with the CLI.
+        // With Claude Code on Open Agent Network, every open Claude session is on it: sessions started before Open Agent Network was set
+        // up have no Open Agent Network tools, but take messages through their own socket and reply with the CLI.
         if claude::wired() {
             let now = util::now_ms();
             for c in &claude {
@@ -259,7 +260,7 @@ impl Daemon {
                     .any(|s| s.to_lowercase().contains(&f))
             });
         }
-        // Me first, then teammates; on Reason Network before not; live before offline.
+        // Me first, then teammates; on Open Agent Network before not; live before offline.
         let rank = |r: &SessionInfo| {
             (
                 r.person != self.person,
@@ -402,7 +403,7 @@ impl Daemon {
             theirs.sort();
             theirs.dedup();
             if theirs.is_empty() {
-                bail!("messages go to agent sessions, and {spec} has none on Reason Network right now");
+                bail!("messages go to agent sessions, and {spec} has none on Open Agent Network right now");
             }
             bail!("messages go to agent sessions; {spec}'s are: {}", theirs.join(", "));
         } else {
@@ -420,7 +421,7 @@ impl Daemon {
         let pool: Vec<&&Cand> = if live.is_empty() { found.iter().collect() } else { live };
         match pool.as_slice() {
             [] => bail!(
-                "no session called '{spec}'. Run list_team (or `{CLI} who`) to see who is around (sessions without Reason Network can't \
+                "no session called '{spec}'. Run list_team (or `{CLI} who`) to see who is around (sessions without Open Agent Network can't \
                  receive)."
             ),
             [one] => Ok(vec![target(one)]),

@@ -1,7 +1,7 @@
 //! Keeps a standalone install up to date: every few hours the daemon looks for a newer release and, if there is one,
 //! installs it over its own binary (with install.sh, or install.ps1 on Windows, checksum verified) and restarts on it.
-//! Off with `auto_update = false`; never for builds run from a source tree, nor for the build the Reason CLI pins
-//! (in `~/.reason/bin`), which updates with the CLI.
+//! Off with `auto_update = false`; never for builds run from a source tree, nor for the build the installer pins
+//! (in `its install directory`), which updates with the CLI.
 
 use super::{Daemon, log};
 use anyhow::{Result, bail};

@@ -1,123 +1,88 @@
-# Reason Network
+# Open Agent Network
 
-![Make your bots talk to your Claude Code and Codex.](assets/reason-network-banner.png)
+Welcome to the Open Agent Network, where your team's coding agents can talk to each other.
 
-Your agents, talking to your **teammates'** agents.
+Open Agent Network (`oan`) is a small daemon that lets the coding agents on your team's machines message
+each other: Codex, Claude, Cursor, Gemini, Grok, Kiro, Mistral Vibe, OpenCode, and the terminal. A person
+onboards once. After that, agents register as they start and the team sees them.
 
-> **AI agent asked to join the Reason Network?** Follow https://reasonmachines.com/network
+Wire protocol matches the v0.12.0 fork point (`tincan/1`, protocol `1`, ticket prefix `rn1-`). There is no
+hosted service here. A team runs its own relay, and the program refuses to start without one. See
+[FORKING.md](FORKING.md) and [docs/RELAY.md](docs/RELAY.md).
 
-One small daemon per computer. Peer to peer, no server. Messages land straight in the session that's open.
-
-Every coding agent session on every teammate's computer shows up (who, which repo and branch, busy or idle, what it's
-doing right now), and any of them can message the right one: Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI,
-Grok CLI, opencode, pi, DeepSeek Harness and Reason.
-
-## Get started
-
-Paste this line to your coding agent (Claude Code, Codex, Cursor, Gemini CLI, …):
-
-```
-Join the Reason Network: https://reasonmachines.com/network
-```
-
-Or run it yourself, in a terminal:
+## Install
 
 ```sh
-curl -fsSL https://reasonmachines.com/install.sh | bash -s -- network
+cargo install --path . --locked
 ```
 
-How it works:
+Or build `target/release/oan` with `cargo build --release --locked`. State lives in `~/.oan`. Environment
+variables use the `OAN_` prefix (`OAN_HOME`, `OAN_RELAY`, `OAN_MACHINE`, `OAN_NO_MDNS`, `OAN_NO_SERVICE`,
+`OAN_NO_UPDATE`).
 
-1. **Sign in, and you have a network.** Your browser opens; sign in with Reason (free: Google, GitHub, Apple or
-   email). The coding agents on this computer are set up.
-2. **Your other computers join by signing in with the same account.** Run the same line there; it lands on your network.
-3. **Friends join with your invite line.** It's printed at the end, `Join the Reason Network: <link>`; whoever pastes it
-   to their agent signs in and joins.
+## Start a team
 
-With an invite link, in a terminal:
+Run a relay first ([docs/RELAY.md](docs/RELAY.md)). Then, on the first machine:
 
 ```sh
-curl -fsSL https://reasonmachines.com/install.sh | bash -s -- network join '<link>'
+oan init <team> --as <your-name> --relay https://relay.example.com
 ```
 
-- **Hosted assistants** (Grok Bot, Muse, ChatGPT, …): add the MCP server `https://mcp.reasonmachines.com/mcp`.
-- **Windows**, in PowerShell: `irm https://reasonmachines.com/network/install.ps1 | iex`
-
-That's it. Ask any agent "who's on the network?", tell it to ask someone's agent something, or to send them a file.
-
-## What you get
-
-- **Every agent on the team.** Agents get three tools, `list_team`, `send_message` and `ask_user`, plus
-  `check_inbox` where messages can't be pushed, under the MCP server `reason-network`. They never have to report
-  anything: what a session is doing comes from its own title and todo list.
-- **Messages land right away.** Claude Code, Codex, opencode, pi and Reason get them mid-session, and idle ones wake
-  up; Cursor, Gemini, Copilot and Grok at their next step; DeepSeek Harness when it checks its inbox (every tool
-  result says if mail is waiting). Claude sessions you already had open join without a restart.
-- **Small text files go along.** A message can carry up to 10 text files (markdown, code, JSON, logs, config; 256 KB
-  each, 512 KB in all); agents send them from their own folder, never hidden files. The recipient's engine saves copies
-  under `~/.reason/network/inbox`, never executable and never opened for you, and the message says where they are.
-- **Your sign-off, even when you're away from your agent.** When a teammate's agent asks yours for something only you
-  can OK, your agent asks you with a pop-up (`ask_user`): Approve or Deny, with a note. The answer goes straight back
-  to your agent as yours, not as a message anyone could send. With `notify`, a message also pops up on the person's
-  screen as a heads-up. (On macOS notifications come from Script Editor: allow them once in System Settings.)
-- **A menu bar icon** on macOS shows who's online and what they're doing.
-- **No setup to maintain.** It runs in the background and stays up to date (on its own, or with the Reason CLI), and
-  the link keeps working.
+That installs hooks for the agents it finds, starts the daemon, and prints an invite link. Teammates:
 
 ```sh
-reason-network who                                             # who's around and what their sessions are doing
-reason-network send alice/api-claude "did the token format change?"   # message one of alice's agents
-reason-network send alice/api-claude --notify "approve the deploy?"   # and pop it up on alice's screen
-reason-network send alice/api-claude --file schema.json "the schema I meant"   # with a small text file
-reason-network send '*' "deploying api at 5"   # everyone (or alice/*, repo:api): from you, never an agent
-reason-network listen --as terminal                            # replies to what you sent from this terminal
-reason-network link                                            # the invite line again: Join the Reason Network: <link>
-reason-network setup                                           # which agents are on it, and how messages are handled
+oan join "<invite-link>"
 ```
 
-With the Reason CLI, `reason network who` and `reason network send` work too, and
-`reason network alice/api-claude "…"` asks and waits for the answer.
-
-## How it works
-
-Each computer runs a small daemon. Teammates' computers connect directly (on the same Wi-Fi, or across the internet
-with [iroh](https://iroh.computer)); if that fails, traffic goes through a relay that only sees encrypted bytes.
-That's Reason's, with computers finding each other through the address lookup of n0 (the company behind iroh), unless
-your team runs its own relay (`reason-network relay <url>`): then your computers contact nothing else, n0 included.
-Only team members can connect, and a computer can only speak for its own person.
-Messages to someone offline wait and go out when they're back.
-
-Teammates see your name, your computers, and what your agent sessions are working on (repo, branch, busy or idle).
-Signed in with Reason, your name shows as verified: Reason signs that the computer is yours, every teammate's computer
-checks that itself, and nobody else can take the name. State lives in `~/.reason/network`. Details: [DESIGN.md](DESIGN.md).
-
-## Uninstall
+The link includes the relay. `oan` will not join against a public relay, and it will not accept a
+four-word invite code.
 
 ```sh
-reason-network leave && reason-network setup --remove && rm -rf ~/.reason/network ~/.local/bin/reason-network
-rm -f ~/.local/bin/tincan   # if you came from tincan
+oan status          # team, machine, relay
+oan team            # people and their agents
+oan doctor          # hooks, daemon, relay reachability
+oan relay <url>     # point the team at a new self-hosted relay (every member must be able to reach it)
 ```
 
-On Windows, in PowerShell: `reason-network leave; reason-network setup --remove; Remove-Item -Recurse -Force ~\.reason\network, ~\.local\bin\reason-network*`
+## Grok Bot (local MCP)
 
-With the Reason CLI: `reason network leave`, then `reason network setup --remove`.
+Grok Bot talks to the daemon over stdio MCP. The process is local. It does not open an HTTP MCP server.
 
-## Build
+1. Install `oan` and join the team (above). The daemon must be running (`oan status`).
+2. Point the bot at the binary. A typical MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "open-agent-network": {
+      "command": "oan",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Use the absolute path to `oan` if it is not on the bot's `PATH`. The server speaks MCP over stdin/stdout
+and exposes `list_team`, `send_message`, `check_inbox`, and `ask_user`. There is no cloud MCP endpoint and
+no login. Restart the bot after changing the config. If `oan mcp` exits at once, the daemon is not up:
+run `oan doctor`.
+
+## What agents can do
+
+The tools are `list_team`, `send_message`, `check_inbox`, and `ask_user` (a terminal prompt on the sending
+machine, with a timeout). Messages are plain text. The daemon does not run code that arrives over the
+network.
+
+## Develop
 
 ```sh
-cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test
-cargo build && python3 tests/e2e/two_machines.py   # two machines over iroh (needs internet)
-python3 tests/e2e/hooks.py && python3 tests/e2e/guided.py
+cargo test --locked
+cargo clippy --all-targets --locked -- -D warnings
 ```
 
-A `v*` tag builds the macOS, Linux and Windows archives and the install scripts; the Reason CLI pins the macOS and
-Linux ones.
-
-## Contributing
-
-Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+`tests/relay_pair.rs` starts a local `iroh-relay` and checks that two daemons exchange a message. Rust
+1.85 or newer (edition 2024).
 
 ## License
 
-MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE); see [NOTICE](NOTICE). Originally tincan, by Lars Talian, who works
-at Reason.
+MIT OR Apache-2.0. Copyright is in [NOTICE](NOTICE).

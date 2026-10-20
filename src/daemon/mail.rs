@@ -1,4 +1,5 @@
 //! Sending, receiving and delivering messages.
+// Modified by compuficial, 2026.
 //!
 //! Delivery is at least once: a message stays unread until whoever showed it to the agent confirms
 //! with `Delivered`. Messages handed to a push channel or a hook are "in flight" meanwhile, so the inbox and hooks
@@ -25,11 +26,11 @@ const IN_FLIGHT_TTL: Duration = Duration::from_secs(90);
 
 /// How a session on this machine gets a message into its conversation.
 enum Channel {
-    /// Its `reason network mcp` posts into Claude Code's session socket.
+    /// Its `oan mcp` posts into Claude Code's session socket.
     ClaudeSocket(u64),
-    /// The agent's own CLI: `codex queue --thread <id> --message`, `reason session send <id> --message`.
+    /// The agent's own CLI: `codex queue --thread <id> --message`.
     Command(&'static str, Vec<String>),
-    /// Straight into a Claude Code session's messaging socket (one without Reason Network's tools: it replies with the CLI).
+    /// Straight into a Claude Code session's messaging socket (one without Open Agent Network's tools: it replies with the CLI).
     ClaudeDirect(agent::ClaudeSocket),
     /// Hooks inject it at the next tool call or turn end.
     Hook,
@@ -68,8 +69,7 @@ impl Inner {
 /// connected, and the message.
 type RemoteJob = (usize, EndpointId, String, bool, Message);
 
-const UPGRADE: &str =
-    "update Reason Network (with the Reason CLI, `reason update`): messages go between agent sessions now";
+const UPGRADE: &str = "update Open Agent Network: messages go between agent sessions now";
 
 const LOOP_NOTE: &str = "refused: these two agents have exchanged a lot of messages in the last few minutes, which \
                          looks like a loop. Check with your user before continuing.";
@@ -113,7 +113,7 @@ impl Daemon {
             let mut g = self.inner.lock().unwrap();
             self.prune(&mut g);
             // Messages come from agent sessions: a session key, or (from agents that reply through the CLI, like
-            // Reason's) its address or name here.
+            // the network's) its address or name here.
             let k = from.as_str();
             let sender = g
                 .live
@@ -277,18 +277,11 @@ impl Daemon {
         if g.polling.get(key).is_some_and(|n| *n > 0) {
             return ("delivered".into(), "delivered: the session was waiting for messages".into());
         }
-        // Reason didn't take the last push: wait out its backoff (its sync pushes again when it allows).
-        if l.reg.agent == "reason" && l.retry.is_some_and(|(at, _)| Instant::now() < at) {
-            return ("queued".into(), "queued: Reason didn't take the last delivery; it is retried shortly".into());
-        }
         let has = |bin: &str| !l.push_failed && agent::find_bin(bin).is_some();
         let channel = match (l.reg.tier, l.conn, &l.reg.agent_session_id) {
             (Tier::Push, Some(conn), _) if l.reg.agent == agent::CLAUDE_CODE => Channel::ClaudeSocket(conn),
             (Tier::Push, _, Some(id)) if l.reg.agent == "codex" && has("codex") => {
                 Channel::Command("codex", vec!["queue".into(), "--thread".into(), id.clone(), "--message".into()])
-            }
-            (Tier::Push, _, Some(id)) if l.reg.agent == "reason" && has("reason") => {
-                Channel::Command("reason", vec!["session".into(), "send".into(), id.clone(), "--message".into()])
             }
             (Tier::Push, None, id) if l.reg.agent == agent::CLAUDE_CODE && !l.push_failed => {
                 match claude::socket_for(id.as_deref(), l.reg.pid) {
@@ -423,17 +416,6 @@ impl Daemon {
                         l.retry = None;
                     }
                 }
-                // Reason has no hooks to fall back on: its sync pushes again, backing off (15 s doubling to 30 min).
-                Err(why) if bin == "reason" => {
-                    if let Some(l) = g.live.get_mut(&key) {
-                        if l.retry.is_none() {
-                            log(&format!("{bin} delivery to {key} failed ({why}); retrying with backoff"));
-                        }
-                        let wait =
-                            l.retry.map_or(Duration::from_secs(15), |(_, w)| (w * 2).min(Duration::from_secs(1800)));
-                        l.retry = Some((Instant::now() + wait, wait));
-                    }
-                }
                 Err(why) => {
                     log(&format!("{bin} delivery to {key} failed ({why}); falling back to hooks"));
                     // Hooks (or check_inbox) show it instead; tell senders the truth from now on.
@@ -454,7 +436,7 @@ impl Daemon {
             .and_then(|t| t.member(&peer).map(|m| m.person.clone()))
             .ok_or_else(|| anyhow!("not a team member"))?;
         let mut msg = clean(msg)?;
-        // Messages go between agent sessions (or, with notify, to a person's screen); an older Reason Network may still send
+        // Messages go between agent sessions (or, with notify, to a person's screen); an older Open Agent Network may still send
         // to or from a person.
         if !msg.from.contains('/') || (!msg.to.contains('/') && !msg.notify) {
             bail!(UPGRADE);
@@ -515,7 +497,7 @@ impl Daemon {
             if !g.loop_ok(&msg.from, &msg.to) {
                 return Ok(("refused".into(), LOOP_NOTE.into()));
             }
-            // Only an older Reason Network still sends an agent's group message; a teammate's isn't taken.
+            // Only an older Open Agent Network still sends an agent's group message; a teammate's isn't taken.
             let sender = msg.from.split_once('/').map_or(msg.from.as_str(), |(p, _)| p);
             if msg.via.is_some() && !msg.from.ends_with("/terminal") && sender != self.person {
                 let note = format!("refused: agents message one of {}'s sessions, not a group", self.person);
@@ -581,7 +563,7 @@ impl Daemon {
                 messages
             };
             if !messages.is_empty() || tokio::time::Instant::now() >= deadline {
-                // A `reason network listen` session replies with the CLI.
+                // A `oan listen` session replies with the CLI.
                 let text = render::for_agent(&messages, agent.as_deref(), agent.as_deref() == Some("cli"));
                 return Ok(Inbox { messages, text });
             }
@@ -636,9 +618,7 @@ impl Drop for Polling<'_> {
 }
 
 pub(super) fn unregistered() -> anyhow::Error {
-    anyhow!(
-        "this session isn't registered with Reason Network; restart the agent session, or use the reason-network tools"
-    )
+    anyhow!("this session isn't registered with Open Agent Network; restart the agent session, or use the oan tools")
 }
 
 /// Keeps a field to plain characters, so nothing a peer sends can reshape what agents are shown.
@@ -687,7 +667,7 @@ fn for_machine(mut msg: Message, takes_files: bool) -> Result<Message, String> {
             (msg.body, msg.files) = (body, Vec::new());
             Ok(msg)
         }
-        None => Err(format!("{} needs to update Reason Network to receive files", msg.to)),
+        None => Err(format!("{} needs to update Open Agent Network to receive files", msg.to)),
     }
 }
 
@@ -797,11 +777,11 @@ mod tests {
         // One that doesn't: written out in the text, as nothing it doesn't know would be dropped.
         let sent = for_machine(msg("port = 1"), false).unwrap();
         assert!(sent.files.is_empty());
-        assert!(sent.body.starts_with("the config\n\n(bob/api runs an older Reason Network"), "{}", sent.body);
+        assert!(sent.body.starts_with("the config\n\n(bob/api runs an older Open Agent Network"), "{}", sent.body);
         assert!(sent.body.ends_with("app.toml:\n```\nport = 1\n```"), "{}", sent.body);
         // Too much to write out: not sent, and the sender is told why.
         let e = for_machine(msg(&"x".repeat(MAX_BODY)), false).unwrap_err();
-        assert_eq!(e, "bob/api needs to update Reason Network to receive files");
+        assert_eq!(e, "bob/api needs to update Open Agent Network to receive files");
         // Nothing to carry: as it is.
         let mut plain = msg("");
         plain.files.clear();

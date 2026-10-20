@@ -1,3 +1,4 @@
+// Modified by compuficial, 2026.
 use crate::{paths, util};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -10,21 +11,19 @@ pub struct Config {
     pub person: Option<String>,
     /// Show teammates full working directories (otherwise only the last component, plus repo@branch).
     pub share_paths: bool,
-    /// Show teammates this machine's Claude Code sessions that don't have Reason Network loaded.
+    /// Show teammates this machine's Claude Code sessions that don't have Open Agent Network loaded.
     pub share_unmanaged: bool,
     /// Find teammates on the local network with mDNS.
     pub lan: bool,
     /// Show the menu bar icon (macOS, while the background service runs).
     pub tray: bool,
-    /// List your live Reason sessions and deliver to them (`reason session list`/`send`).
-    pub reason: bool,
-    /// Install new releases when they come out (the daemon checks every few hours).
+    /// Install new releases from this project's repository when they come out (off unless set).
     pub auto_update: bool,
     pub inbound: Inbound,
 }
 
 /// What happens to messages from teammates' agents: `accept` delivers them, `hold` waits for you to approve
-/// (`reason-network held`), `refuse` bounces them.
+/// (`oan held`), `refuse` bounces them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Inbound {
@@ -49,8 +48,7 @@ impl Default for Config {
             share_unmanaged: false,
             lan: true,
             tray: true,
-            reason: false,
-            auto_update: true,
+            auto_update: false,
             inbound: Inbound::default(),
         }
     }
@@ -65,7 +63,7 @@ impl Default for Inbound {
 impl Config {
     pub fn load() -> Self {
         Self::load_strict().unwrap_or_else(|e| {
-            eprintln!("reason-network: ignoring {} (fix or delete it): {e}", paths::config().display());
+            eprintln!("oan: ignoring {} (fix or delete it): {e}", paths::config().display());
             Config::default()
         })
     }

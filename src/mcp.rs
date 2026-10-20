@@ -1,4 +1,5 @@
-//! `reason-network mcp`: the stdio MCP server an agent spawns. A thin client of the daemon.
+//! `oan mcp`: the stdio MCP server an agent spawns. A thin client of the daemon.
+// Modified by compuficial, 2026.
 
 use crate::{
     agent::{self, ClaudeSocket},
@@ -27,13 +28,13 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-/// How agents should use Reason Network, kept once: in the skill, for agents with the tools and without.
+/// How agents should use Open Agent Network, kept once: in the skill, for agents with the tools and without.
 const SKILL: &str = include_str!("skill.md");
 
 fn instructions() -> String {
     // Windows checkouts may have turned the file's line ends into \r\n.
     let rules = SKILL.split_once("## How to behave").map_or(String::new(), |(_, r)| r.trim().replace('\r', ""));
-    format!("Reason Network connects you with your teammates' coding agents.\n\n{rules}")
+    format!("Open Agent Network connects you with your teammates' coding agents.\n\n{rules}")
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -69,7 +70,7 @@ pub struct SendArgs {
 pub struct AskArgs {
     /// What they need to decide: who asks for what, and why.
     pub question: String,
-    /// When it's about a teammate's message, its id (the `id="…"` of their `<reason-message>`): your user sees that
+    /// When it's about a teammate's message, its id (the `id="…"` of their `<oan-message>`): your user sees that
     /// request in the pop-up, and its sender gets the answer signed by this machine.
     #[serde(default)]
     pub about: Option<String>,
@@ -83,7 +84,7 @@ pub struct InboxArgs {
 }
 
 #[derive(Clone)]
-pub struct ReasonNetworkMcp {
+pub struct OanMcp {
     link: Arc<Link>,
     env_agent: Option<&'static str>,
     claude: Option<Arc<ClaudeSocket>>,
@@ -94,12 +95,12 @@ pub struct ReasonNetworkMcp {
 
 pub async fn run() -> Result<()> {
     let (tx, mut events) = mpsc::unbounded_channel();
-    let server = ReasonNetworkMcp {
+    let server = OanMcp {
         link: Link::new(Some(tx)),
         env_agent: agent::detect_env(),
         claude: agent::claude_socket().map(Arc::new),
         client_agent: Default::default(),
-        tool_router: ReasonNetworkMcp::tool_router(),
+        tool_router: OanMcp::tool_router(),
     };
     let service = server.clone().serve(stdio()).await?;
 
@@ -119,7 +120,7 @@ pub async fn run() -> Result<()> {
         if !agent::multiplexed(agent)
             && let Err(e) = s.session(agent, None).await
         {
-            eprintln!("reason-network: registering session: {e:#}");
+            eprintln!("oan: registering session: {e:#}");
         }
     });
 
@@ -128,7 +129,7 @@ pub async fn run() -> Result<()> {
 }
 
 #[tool_router]
-impl ReasonNetworkMcp {
+impl OanMcp {
     #[tool(
         description = "List your team's live agent sessions: who, which machine and agent, repo@branch, busy/idle, \
                        and what each is doing. Use it to find the right recipient.",
@@ -239,7 +240,7 @@ impl ReasonNetworkMcp {
 }
 
 #[tool_handler(router = self.tool_router)]
-impl ServerHandler for ReasonNetworkMcp {
+impl ServerHandler for OanMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(crate::AGENT_NAME, env!("CARGO_PKG_VERSION")))
@@ -260,7 +261,7 @@ impl ServerHandler for ReasonNetworkMcp {
     }
 }
 
-impl ReasonNetworkMcp {
+impl OanMcp {
     /// Whether messages reach this session by being pushed into it: Claude Code, through its inbox.
     fn pushed(&self, agent: &str) -> bool {
         agent == agent::CLAUDE_CODE && self.claude.is_some()
@@ -357,14 +358,14 @@ impl ReasonNetworkMcp {
             Ok(Ok(())) => {
                 let _ = self.link.call::<Value>(Request::Delivered { key, ids }).await;
             }
-            Ok(Err(e)) => eprintln!("reason-network: delivering to Claude Code: {e}"),
-            Err(e) => eprintln!("reason-network: delivering to Claude Code: {e}"),
+            Ok(Err(e)) => eprintln!("oan: delivering to Claude Code: {e}"),
+            Err(e) => eprintln!("oan: delivering to Claude Code: {e}"),
         }
     }
 }
 
 /// The files an agent asked to send, read only from its own folder: its repository (or where it works), none of its
-/// hidden files, nothing where credentials or Reason Network's state are kept. A person's `send --file` has no such
+/// hidden files, nothing where credentials or Open Agent Network's state are kept. A person's `send --file` has no such
 /// limit; an agent can be talked into sending what its harness wouldn't let it read.
 fn agent_files(paths: &[String]) -> Result<Vec<Attachment>> {
     if paths.is_empty() {
@@ -381,10 +382,10 @@ fn failure(e: anyhow::Error) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(format!("{e:#}"))])
 }
 
-/// Getting this machine into a team: the Reason CLI does it, or a team link with this binary's own path.
+/// Getting this machine into a team: the installer does it, or a team link with this binary's own path.
 fn join_hint() -> String {
     if crate::managed() {
-        return "This machine isn't on a Reason Network yet: ask your user to run `reason network`.".into();
+        return "This machine isn't on a Open Agent Network yet: ask your user to run `oan`.".into();
     }
     let exe = crate::setup::exe()
         .map_or_else(|_| crate::AGENT_NAME.into(), |p| crate::setup::shell_cmd(&p, "").trim_end().to_string());

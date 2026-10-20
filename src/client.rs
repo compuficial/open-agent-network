@@ -1,4 +1,5 @@
-//! Connection to the local daemon, starting it if needed. Long-lived clients (`reason-network mcp`) reconnect on their
+//! Connection to the local daemon, starting it if needed. Long-lived clients (`oan mcp`) reconnect on their
+// Modified by compuficial, 2026.
 //! own and re-register their sessions, so a daemon restart is invisible to the agent.
 
 use crate::{ipc, paths, proto::*};
@@ -144,7 +145,7 @@ async fn reconnect(link: Weak<Link>) {
         let Some(link) = link.upgrade() else { return };
         match link.connect().await {
             Ok(_) => return,
-            Err(e) => eprintln!("reason-network: reconnecting to daemon: {e:#}"),
+            Err(e) => eprintln!("oan: reconnecting to daemon: {e:#}"),
         }
         wait = (wait * 2).min(Duration::from_secs(30));
     }
@@ -200,15 +201,15 @@ async fn connect_or_start(start: bool) -> Result<ipc::Stream> {
             }
         }
     }
-    // Reaped when it exits, so a long-lived client (`reason-network mcp`) never collects zombies.
+    // Reaped when it exits, so a long-lived client (`oan mcp`) never collects zombies.
     if let Some(mut c) = child {
         std::thread::spawn(move || c.wait());
     }
     connected.ok_or_else(failed)
 }
 
-/// Starts `reason-network daemon` (`--service` with `service`) detached from this process group, logging to
-/// `~/.reason/network/daemon.log`.
+/// Starts `oan daemon` (`--service` with `service`) detached from this process group, logging to
+/// `~/.oan/daemon.log`.
 pub fn start_daemon(service: bool) -> Result<std::process::Child> {
     paths::ensure_home()?;
     let log = std::fs::OpenOptions::new().create(true).append(true).open(paths::log())?;
@@ -244,7 +245,7 @@ fn detach(cmd: &mut Command) -> std::io::Result<std::process::Child> {
 mod tests {
     #[test]
     fn a_daemon_runs_only_while_it_holds_the_lock() {
-        let dir = std::env::temp_dir().join(format!("reason-network-lock-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oan-lock-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("daemon.lock");
         // A pid left behind by a daemon that exited (or a zombie): the lock is free.

@@ -1,4 +1,5 @@
 //! Which agent are we running under, what is its session, and how do we reach it.
+// Modified by compuficial, 2026.
 
 use crate::{git::GitInfo, paths, util};
 use serde_json::{Value, json};
@@ -9,7 +10,7 @@ use std::{
 
 pub const CLAUDE_CODE: &str = "claude-code";
 
-/// Best guess from the environment the agent gives its children. `REASON_NETWORK_AGENT` (set by `reason network setup` in the
+/// Best guess from the environment the agent gives its children. `OAN_AGENT` (set by `oan setup` in the
 /// MCP config) wins.
 pub fn detect_env() -> Option<&'static str> {
     let has = |k: &str| std::env::var_os(k).is_some();
@@ -59,8 +60,6 @@ pub fn from_client_name(name: &str) -> Option<&'static str> {
     } else if n == "dsh" || n.starts_with("dsh-") {
         // DeepSeek Harness: its MCP client says `dsh-mcp-client`.
         "dsh"
-    } else if has("reason") {
-        "reason"
     } else if n == "amp" || n.starts_with("amp-") || n.starts_with("amp ") {
         "amp"
     } else if has("zed") {
@@ -79,7 +78,7 @@ pub fn multiplexed(agent: &str) -> bool {
     matches!(agent, "codex" | "opencode" | "cursor")
 }
 
-/// The session id an agent exports to its MCP servers, if any. `REASON_NETWORK_SESSION` is set by our own pi extension.
+/// The session id an agent exports to its MCP servers, if any. `OAN_SESSION` is set by our own pi extension.
 pub fn env_session_id(agent: &str) -> Option<String> {
     if let Some(id) = crate::paths::env_var("SESSION").ok().filter(|s| !s.is_empty()) {
         return Some(id);
@@ -172,7 +171,6 @@ pub fn label(agent: &str) -> &str {
     match agent {
         "codex" => "Codex",
         "grok" => "Grok",
-        "reason" => "Reason",
         a => a,
     }
 }
@@ -251,8 +249,8 @@ mod tests {
         assert_eq!(from_client_name("codex-mcp-client"), Some("codex"));
         assert_eq!(from_client_name("cursor-vscode"), Some("cursor"));
         assert_eq!(from_client_name("gemini-cli-mcp-client"), Some("gemini"));
-        // grok names its client after the server, so this one also contains "reason".
-        assert_eq!(from_client_name("grok-shell-reason-network"), Some("grok"));
+        // grok names its client after the server.
+        assert_eq!(from_client_name("grok-shell-oan"), Some("grok"));
         assert_eq!(from_client_name("dsh-mcp-client"), Some("dsh"));
         assert_eq!(from_client_name("ashdsh"), None);
         assert_eq!(from_client_name("claude-ai"), Some("claude-desktop"));

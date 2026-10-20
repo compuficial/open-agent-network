@@ -1,4 +1,5 @@
-//! Sessions running on this machine: registered by `reason network mcp` (a connection), or by hooks (no connection,
+//! Sessions running on this machine: registered by `oan mcp` (a connection), or by hooks (no connection,
+// Modified by compuficial, 2026.
 //! kept alive by hook events and the agent's process).
 
 use super::{Daemon, Inner, Live, log};
@@ -16,8 +17,8 @@ impl Daemon {
     fn hook_tier(&self, agent: &str, push_failed: bool) -> Tier {
         match agent {
             "codex" if !push_failed && agent::find_bin("codex").is_some() => Tier::Push,
-            // Their plugin or extension delivers into idle sessions; Reason's CLI sends into its sessions.
-            "opencode" | "pi" | "reason" => Tier::Push,
+            // Their plugin or extension delivers into idle sessions.
+            "opencode" | "pi" => Tier::Push,
             _ => Tier::Turn,
         }
     }

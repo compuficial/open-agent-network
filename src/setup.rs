@@ -1,12 +1,13 @@
-//! `setup`: wires Reason Network into every agent on this machine (MCP server, plus hooks where the agent has them) and
+//! `setup`: wires Open Agent Network into every agent on this machine (MCP server, plus hooks where the agent has them) and
+// Modified by compuficial, 2026.
 //! installs the daemon as a login service. `setup --remove` undoes it. Every file it edits
-//! is backed up once, as `<file>.bak-reason`. Also `doctor`.
+//! is backed up once, as `<file>.bak-oan`. Also `doctor`.
 //!
 //! Earlier builds wired agents in under `LEGACY_NAME`. Each step here also takes out what this binary's path put
 //! there under that name, so an update moves an agent over and leaves nothing behind; another program of that name
 //! (at another path) keeps its wiring.
 
-use crate::{AGENT_NAME, CLI, LEGACY_NAME, agent, client::Link, config::Config, paths, proto::*, render};
+use crate::{AGENT_NAME, CLI, LEGACY_NAME, agent, client::Link, paths, proto::*, render};
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Map, Value, json};
 use std::{
@@ -14,10 +15,10 @@ use std::{
     process::Command,
 };
 
-/// The service's name. A non-default `REASON_NETWORK_HOME` gets its own, so a second instance (or a test) can never
+/// The service's name. A non-default `OAN_HOME` gets its own, so a second instance (or a test) can never
 /// replace the real one.
 fn service_name() -> String {
-    service_label("com.reasonmachines.network")
+    service_label(crate::fork::SERVICE_LABEL)
 }
 
 /// The upstream engine's service name, which this binary ran under before.
@@ -49,8 +50,8 @@ pub fn exe() -> Result<PathBuf> {
     Ok(exe.canonicalize()?)
 }
 
-/// The command line agents run through a shell: `'/path/to/reason-network' hook codex stop`. On Windows that shell is
-/// PowerShell (`& 'C:\Users\Alex Smith\…\reason-network.exe' hook codex stop`), and a path that needs no quotes also runs in
+/// The command line agents run through a shell: `'/path/to/oan' hook codex stop`. On Windows that shell is
+/// PowerShell (`& 'C:\Users\Alex Smith\…\oan.exe' hook codex stop`), and a path that needs no quotes also runs in
 /// cmd.exe.
 pub fn shell_cmd(exe: &Path, args: &str) -> String {
     let p = exe.display().to_string();
@@ -105,7 +106,7 @@ fn write_file(path: &Path, content: &str, dry: bool) -> Result<bool> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let backup = PathBuf::from(format!("{}.bak-reason", path.display()));
+    let backup = PathBuf::from(format!("{}.bak-oan", path.display()));
     // The upstream engine's backup is the same original under its old name.
     let legacy_backup = PathBuf::from(format!("{}.bak-{LEGACY_NAME}", path.display()));
     if !backup.exists() && legacy_backup.exists() {
@@ -117,7 +118,7 @@ fn write_file(path: &Path, content: &str, dry: bool) -> Result<bool> {
         std::fs::copy(path, &backup)?;
     }
     // Write then rename, so an agent never reads a half-written file.
-    let tmp = PathBuf::from(format!("{}.tmp-reason", path.display()));
+    let tmp = PathBuf::from(format!("{}.tmp-oan", path.display()));
     std::fs::write(&tmp, content)?;
     // Keep its permissions (a config holding tokens may be 0600).
     if let Ok(meta) = std::fs::metadata(path) {
@@ -128,7 +129,7 @@ fn write_file(path: &Path, content: &str, dry: bool) -> Result<bool> {
 }
 
 fn write_json(path: &Path, v: &Value, dry: bool) -> Result<bool> {
-    // Removing Reason Network from a config that never existed leaves an empty shell: don't create a file for that.
+    // Removing Open Agent Network from a config that never existed leaves an empty shell: don't create a file for that.
     if !path.exists() && hollow(v) {
         return Ok(false);
     }
@@ -344,9 +345,9 @@ fn codex(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
         t["command"] = toml_edit::value(exe.display().to_string());
         t["args"] = toml_edit::value(toml_edit::Array::from_iter(["mcp"]));
         let mut env = toml_edit::InlineTable::new();
-        env.insert("REASON_NETWORK_AGENT", "codex".into());
+        env.insert("OAN_AGENT", "codex".into());
         if let Ok(h) = crate::paths::env_var("HOME") {
-            env.insert("REASON_NETWORK_HOME", h.into());
+            env.insert("OAN_HOME", h.into());
         }
         t["env"] = toml_edit::value(env);
         // Room for check_inbox(wait_secs) long-polls.
@@ -376,7 +377,7 @@ fn codex(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
     let did = write_json(&hooks_path, &v, dry)?;
     r.lines.push(changed(&hooks_path, did));
     if did && !remove {
-        r.notes.push("Codex asks once to trust Reason Network's hooks: choose \"Trust all and continue\".".into());
+        r.notes.push("Codex asks once to trust Open Agent Network's hooks: choose \"Trust all and continue\".".into());
     }
     Ok(Some(r))
 }
@@ -412,9 +413,9 @@ fn grok(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
         t["command"] = toml_edit::value(exe.display().to_string());
         t["args"] = toml_edit::value(toml_edit::Array::from_iter(["mcp"]));
         let mut env = toml_edit::InlineTable::new();
-        env.insert("REASON_NETWORK_AGENT", "grok".into());
+        env.insert("OAN_AGENT", "grok".into());
         if let Ok(h) = crate::paths::env_var("HOME") {
-            env.insert("REASON_NETWORK_HOME", h.into());
+            env.insert("OAN_HOME", h.into());
         }
         t["env"] = toml_edit::value(env);
         t["enabled"] = toml_edit::value(true);
@@ -500,7 +501,7 @@ fn cursor(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
     } else {
         servers.insert(
             AGENT_NAME.into(),
-            json!({ "type": "stdio", "command": exe.display().to_string(), "args": ["mcp"], "env": { "REASON_NETWORK_AGENT": "cursor" } }),
+            json!({ "type": "stdio", "command": exe.display().to_string(), "args": ["mcp"], "env": { "OAN_AGENT": "cursor" } }),
         );
     }
     r.lines.push(changed(&mcp_path, write_json(&mcp_path, &v, dry)?));
@@ -540,7 +541,7 @@ fn gemini(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
     } else {
         servers.insert(
             AGENT_NAME.into(),
-            json!({ "command": exe.display().to_string(), "args": ["mcp"], "env": { "REASON_NETWORK_AGENT": "gemini" }, "timeout": 660000, "trust": true }),
+            json!({ "command": exe.display().to_string(), "args": ["mcp"], "env": { "OAN_AGENT": "gemini" }, "timeout": 660000, "trust": true }),
         );
     }
     let group = |event: &str, timeout: u64| json!({ "matcher": "*", "hooks": [{ "type": "command", "name": format!("{AGENT_NAME}-{event}"), "command": shell_cmd(exe, &format!("hook gemini {event}")), "timeout": timeout }] });
@@ -555,7 +556,7 @@ fn gemini(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
     let did = write_json(&path, &v, dry)?;
     r.lines.push(changed(&path, did));
     if did && !remove {
-        r.notes.push("Gemini CLI only runs Reason Network in trusted folders (`/permissions trust`).".into());
+        r.notes.push("Gemini CLI only runs Open Agent Network in trusted folders (`/permissions trust`).".into());
     }
     Ok(Some(r))
 }
@@ -577,7 +578,7 @@ fn copilot(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
     } else {
         servers.insert(
             AGENT_NAME.into(),
-            json!({ "type": "local", "command": exe.display().to_string(), "args": ["mcp"], "env": { "REASON_NETWORK_AGENT": "copilot" }, "tools": ["*"], "timeout": 660000 }),
+            json!({ "type": "local", "command": exe.display().to_string(), "args": ["mcp"], "env": { "OAN_AGENT": "copilot" }, "tools": ["*"], "timeout": 660000 }),
         );
     }
     r.lines.push(changed(&mcp_path, write_json(&mcp_path, &v, dry)?));
@@ -617,7 +618,7 @@ fn opencode(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
     let path = dir.join("opencode.json");
     if dir.join("opencode.jsonc").exists() && !path.exists() {
         r.notes.push(format!(
-            "opencode: you use opencode.jsonc, which Reason Network doesn't edit. Add under \"mcp\": \"{AGENT_NAME}\": {{\"type\": \"local\", \"command\": [\"{}\", \"mcp\"], \"environment\": {{\"REASON_NETWORK_AGENT\": \"opencode\"}}}}",
+            "opencode: you use opencode.jsonc, which Open Agent Network doesn't edit. Add under \"mcp\": \"{AGENT_NAME}\": {{\"type\": \"local\", \"command\": [\"{}\", \"mcp\"], \"environment\": {{\"OAN_AGENT\": \"opencode\"}}}}",
             exe.display()
         ));
     } else {
@@ -629,7 +630,7 @@ fn opencode(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
         } else {
             mcp.insert(
                 AGENT_NAME.into(),
-                json!({ "type": "local", "command": [exe.display().to_string(), "mcp"], "environment": { "REASON_NETWORK_AGENT": "opencode" }, "enabled": true }),
+                json!({ "type": "local", "command": [exe.display().to_string(), "mcp"], "environment": { "OAN_AGENT": "opencode" }, "enabled": true }),
             );
         }
         r.lines.push(changed(&path, write_json(&path, &v, dry)?));
@@ -653,7 +654,7 @@ fn opencode(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
 
 // ---- pi ----
 
-/// One extension does it all: it adds Reason Network's MCP server to each session (deferred, so the tools stay out of
+/// One extension does it all: it adds Open Agent Network's MCP server to each session (deferred, so the tools stay out of
 /// the model's context until it looks for them) and delivers messages.
 fn pi(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
     if !pi_home().exists() && agent::find_bin("pi").is_none() {
@@ -679,8 +680,8 @@ fn pi(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
 
 // ---- DeepSeek Harness (dsh) ----
 
-const DSH_BEGIN: &str = "# === reason-network MCP BEGIN ===";
-const DSH_END: &str = "# === reason-network MCP END ===";
+const DSH_BEGIN: &str = "# === oan MCP BEGIN ===";
+const DSH_END: &str = "# === oan MCP END ===";
 
 fn dsh_home() -> PathBuf {
     // dsh takes a blank `DSH_HOME` for unset, spaces included.
@@ -707,7 +708,7 @@ fn dsh_block(exe: &Path) -> String {
     format!(
         "{DSH_BEGIN}\n- insert:\n    - id: mcp-{AGENT_NAME}\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        \
          serverName: {AGENT_NAME}\n        transport: stdio\n        command: '{command}'\n        args:\n          - mcp\n        \
-         env:\n          REASON_NETWORK_AGENT: dsh\n        toolCallTimeoutMs: 660000\n{DSH_END}\n"
+         env:\n          OAN_AGENT: dsh\n        toolCallTimeoutMs: 660000\n{DSH_END}\n"
     )
 }
 
@@ -720,7 +721,7 @@ fn dsh_entries(text: &str) -> Vec<&str> {
     text.lines().filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')).collect()
 }
 
-/// Whether an entry of the file (not a comment) names an MCP server `reason-network`, quoted or not.
+/// Whether an entry of the file (not a comment) names an MCP server `oan`, quoted or not.
 fn dsh_has_server(text: &str) -> bool {
     dsh_entries(text).iter().any(|l| {
         let line = l.trim_start().trim_start_matches("- ").trim_start();
@@ -799,7 +800,7 @@ fn dsh(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
             r.lines.push(changed(&path, write_file(&path, &new, dry)?));
             if !remove {
                 r.notes.push(
-                    "DeepSeek Harness reads Reason Network messages when it checks its inbox; start a new dsh session to load the MCP server."
+                    "DeepSeek Harness reads Open Agent Network messages when it checks its inbox; start a new dsh session to load the MCP server."
                         .into(),
                 );
             }
@@ -807,28 +808,6 @@ fn dsh(exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
         Ok(None) => r.lines.push(changed(&path, false)),
         // Skipped, not set up: `apply` says so, and the wizard doesn't count it among the agents it set up.
         Err(e) => return Err(anyhow!("{}: {e:#}", crate::util::tilde(&path.display().to_string()))),
-    }
-    Ok(Some(r))
-}
-
-// ---- Reason ----
-
-/// Reason's agent runs in its cloud: nothing to install there. The daemon lists your live Reason sessions and
-/// delivers with `reason session send`; they reply with the reason CLI.
-fn reason(_exe: &Path, remove: bool, dry: bool) -> Result<Option<Report>> {
-    if agent::find_bin("reason").is_none() {
-        return Ok(None);
-    }
-    let mut r = Report { agent: "Reason", lines: Vec::new(), notes: Vec::new() };
-    let mut cfg = Config::load_strict()?;
-    if cfg.reason != remove {
-        r.lines.push("already set".into());
-    } else {
-        if !dry {
-            cfg.reason = !remove;
-            cfg.save()?;
-        }
-        r.lines.push(if remove { "stopped listing Reason sessions" } else { "lists your live Reason sessions" }.into());
     }
     Ok(Some(r))
 }
@@ -958,8 +937,6 @@ async fn install_service(exe: &Path, remove: bool, dry: bool, stop: bool) -> Res
     let path = service_path();
     let uid = unsafe { libc::getuid() };
     let engine_home = crate::paths::env_var("HOME").ok();
-    // The Reason CLI that set this up, so the daemon runs that one's relay rather than whatever `reason` is on its PATH.
-    let reason_bin = crate::paths::env_var("REASON_BIN").ok().filter(|b| !b.is_empty() && crate::managed());
     let legacy = stop && remove_legacy_service(exe, dry);
     if cfg!(target_os = "macos") {
         let target = format!("gui/{uid}/{}", service_name());
@@ -971,12 +948,8 @@ async fn install_service(exe: &Path, remove: bool, dry: bool, stop: bool) -> Res
             }
             return Ok("removed the login service".into());
         }
-        let home_env = engine_home
-            .map(|h| format!("\n    <key>REASON_NETWORK_HOME</key><string>{}</string>", xml(&h)))
-            .unwrap_or_default()
-            + &reason_bin
-                .map(|b| format!("\n    <key>REASON_NETWORK_REASON_BIN</key><string>{}</string>", xml(&b)))
-                .unwrap_or_default();
+        let home_env =
+            engine_home.map(|h| format!("\n    <key>OAN_HOME</key><string>{}</string>", xml(&h))).unwrap_or_default();
         let plist = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1047,13 +1020,9 @@ async fn install_service(exe: &Path, remove: bool, dry: bool, stop: bool) -> Res
         }
         // systemd expands `%` specifiers and reads `\` and `"` as escapes inside a quoted value.
         let value = |v: &str| v.replace('%', "%%").replace('\\', "\\\\").replace('"', "\\\"");
-        let home_env =
-            engine_home.map(|h| format!("Environment=\"REASON_NETWORK_HOME={}\"\n", value(&h))).unwrap_or_default()
-                + &reason_bin
-                    .map(|b| format!("Environment=\"REASON_NETWORK_REASON_BIN={}\"\n", value(&b)))
-                    .unwrap_or_default();
+        let home_env = engine_home.map(|h| format!("Environment=\"OAN_HOME={}\"\n", value(&h))).unwrap_or_default();
         let unit = format!(
-            "[Unit]\nDescription=Reason Network daemon\n\n[Service]\nExecStart={} daemon --service\nRestart=always\nRestartSec=3\nEnvironment=\"PATH={}\"\n{home_env}StandardError=append:{}\n\n[Install]\nWantedBy=default.target\n",
+            "[Unit]\nDescription=Open Agent Network daemon\n\n[Service]\nExecStart={} daemon --service\nRestart=always\nRestartSec=3\nEnvironment=\"PATH={}\"\n{home_env}StandardError=append:{}\n\n[Install]\nWantedBy=default.target\n",
             shell_cmd(exe, "").trim_end().replace('%', "%%"),
             value(&service_path_env()),
             paths::log().display().to_string().replace('%', "%%")
@@ -1150,7 +1119,7 @@ async fn service(exe: &Path, remove: bool, dry: bool) -> Result<String> {
     }
     // Windows starts it with its command line and nothing else.
     if crate::paths::env_var_os("HOME").is_some() {
-        return Err(anyhow!("a logon entry can't set REASON_NETWORK_HOME"));
+        return Err(anyhow!("a logon entry can't set OAN_HOME"));
     }
     let command = format!("\"{}\" daemon --service", exe.display());
     let did = !run_entry().is_some_and(|v| contains(&v, &command));
@@ -1202,7 +1171,7 @@ fn me(exe: &Path) -> String {
     s[1..s.len() - 1].to_string()
 }
 
-const AGENTS: [Agent; 10] = [
+const AGENTS: [Agent; 9] = [
     Agent {
         id: "claude",
         name: "Claude Code",
@@ -1290,14 +1259,6 @@ const AGENTS: [Agent; 10] = [
         wired: |exe| std::fs::read_to_string(dsh_patch()).is_ok_and(|t| dsh_wired(&t, exe)),
         apply: dsh,
     },
-    Agent {
-        id: "reason",
-        name: "Reason",
-        hint: "messages arrive after its current turn",
-        installed: || agent::find_bin("reason").is_some(),
-        wired: |_| Config::load().reason,
-        apply: reason,
-    },
 ];
 
 /// The agents wired to the tincan binary beside `exe`, which move over to it.
@@ -1316,8 +1277,6 @@ pub fn legacy_wiring(exe: &Path) -> Vec<&'static str> {
         "pi" => {
             std::fs::read_to_string(pi_home().join(format!("extensions/{LEGACY_NAME}.ts"))).is_ok_and(|t| ours(&t, exe))
         }
-        // Its setting moved over with the state; nothing of it names the tincan binary.
-        "reason" => false,
         _ => (a.wired)(&old),
     };
     AGENTS.iter().filter(|a| (a.installed)() && wired(a)).map(|a| a.id).collect()
@@ -1349,7 +1308,7 @@ pub struct Applied {
     pub service: Option<bool>,
 }
 
-/// Wires Reason Network into the `install` agents and out of the `remove` ones; installs (`Some(true)`) or removes
+/// Wires Open Agent Network into the `install` agents and out of the `remove` ones; installs (`Some(true)`) or removes
 /// (`Some(false)`) the login service.
 pub async fn apply(exe: &Path, install: &[&str], remove: &[&str], service: Option<bool>, dry: bool) -> Applied {
     let mut out = Applied::default();
@@ -1373,7 +1332,7 @@ pub async fn apply(exe: &Path, install: &[&str], remove: &[&str], service: Optio
     }
     if let Some(on) = service {
         if crate::paths::env_var_os("NO_SERVICE").is_some() {
-            out.lines.push("service: skipped (REASON_NETWORK_NO_SERVICE is set)".into());
+            out.lines.push("service: skipped (OAN_NO_SERVICE is set)".into());
             return out;
         }
         match self::service(exe, !on, dry).await {
@@ -1382,8 +1341,9 @@ pub async fn apply(exe: &Path, install: &[&str], remove: &[&str], service: Optio
                 out.service = Some(on);
             }
             Err(e) => {
-                out.notes
-                    .push(format!("Not running in the background: {e:#}; Reason Network starts it when you use it."));
+                out.notes.push(format!(
+                    "Not running in the background: {e:#}; Open Agent Network starts it when you use it."
+                ));
             }
         }
     }
@@ -1397,14 +1357,14 @@ pub async fn run(dry: bool, remove: bool, no_service: bool) -> Result<()> {
     let verb = if dry {
         "Would change"
     } else if remove {
-        "Removing Reason Network"
+        "Removing Open Agent Network"
     } else {
-        "Setting up Reason Network"
+        "Setting up Open Agent Network"
     };
     println!("{verb} ({}):", crate::util::tilde(&exe.display().to_string()));
     if found.is_empty() && !remove {
         println!(
-            "  no supported agents found (Claude Code, Codex, Grok CLI, Cursor, Gemini CLI, Copilot CLI, opencode, pi, DeepSeek Harness, Reason)"
+            "  no supported agents found (Claude Code, Codex, Grok CLI, Cursor, Gemini CLI, Copilot CLI, opencode, pi, DeepSeek Harness)"
         );
     }
     let ids: Vec<&str> = found.iter().map(|f| f.id).collect();
@@ -1432,7 +1392,7 @@ pub async fn quietly() -> Result<Vec<&'static str>> {
 /// Read-only checks, one line each.
 pub async fn doctor() -> Result<()> {
     let exe = exe()?;
-    println!("reason-network {} at {}", env!("CARGO_PKG_VERSION"), crate::util::tilde(&exe.display().to_string()));
+    println!("oan {} at {}", env!("CARGO_PKG_VERSION"), crate::util::tilde(&exe.display().to_string()));
     let link = Link::new(None);
     match link.call::<TeamInfo>(Request::Team).await {
         Ok(t) => {
@@ -1454,7 +1414,7 @@ pub async fn doctor() -> Result<()> {
                 println!(
                     "  ! if the team changed relays while this machine was off, set the same one here: `{CLI} relay <url>`"
                 );
-                println!("    (or `default` for Reason's); `{CLI} team` on a teammate's machine shows which");
+                println!("    (or `default` for the network's); `{CLI} team` on a teammate's machine shows which");
             }
         }
         Err(e) if e.to_string().contains("not in a team") => {
@@ -1473,7 +1433,7 @@ pub async fn doctor() -> Result<()> {
         if f.wired {
             println!("✓ {}: wired up", f.name);
         } else {
-            println!("- {}: installed, not on Reason Network (`{CLI} setup`)", f.name);
+            println!("- {}: installed, not on Open Agent Network (`{CLI} setup`)", f.name);
         }
     }
     Ok(())
@@ -1488,12 +1448,12 @@ mod tests {
         let mut doc: toml_edit::DocumentMut = "[permission]\nallow = [\"Bash(ls)\"]\n".parse().unwrap();
         grok_allow(&mut doc, false);
         grok_allow(&mut doc, false);
-        assert_eq!(doc.to_string(), "[permission]\nallow = [\"Bash(ls)\", \"MCPTool(reason-network__*)\"]\n");
+        assert_eq!(doc.to_string(), "[permission]\nallow = [\"Bash(ls)\", \"MCPTool(oan__*)\"]\n");
         grok_allow(&mut doc, true);
         assert_eq!(doc.to_string(), "[permission]\nallow = [\"Bash(ls)\"]\n");
         let mut doc = toml_edit::DocumentMut::new();
         grok_allow(&mut doc, false);
-        assert!(doc.to_string().contains("MCPTool(reason-network__*)"));
+        assert!(doc.to_string().contains("MCPTool(oan__*)"));
         grok_allow(&mut doc, true);
         assert_eq!(doc.to_string(), "");
     }
@@ -1502,10 +1462,10 @@ mod tests {
     fn hook_groups_merge_and_remove() {
         let mut hooks = serde_json::from_value::<Map<String, Value>>(json!({
             "Stop": [{ "hooks": [{ "type": "command", "command": "other-tool stop" }] }],
-            "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/x/reason-network hook codex post-tool-use" }] }],
+            "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/x/oan hook codex post-tool-use" }] }],
         }))
         .unwrap();
-        let ours = |e: &str| json!({ "hooks": [{ "type": "command", "command": format!("/y/reason-network hook codex {e} ") }] });
+        let ours = |e: &str| json!({ "hooks": [{ "type": "command", "command": format!("/y/oan hook codex {e} ") }] });
         merge_hook_groups(
             &mut hooks,
             "codex",
@@ -1523,20 +1483,20 @@ mod tests {
 
     #[test]
     fn dsh_patch_gets_our_block_once_and_loses_it_again() {
-        let block = dsh_block(Path::new("/usr/local/bin/reason-network"));
+        let block = dsh_block(Path::new("/usr/local/bin/oan"));
         let with = dsh_patch_text(DSH_PATCH, &block, false).unwrap().unwrap();
         assert!(with.starts_with(DSH_PATCH) && with.contains(&block), "{with}");
         assert_eq!(dsh_patch_text(&with, &block, false).unwrap(), None, "already there");
-        let moved = dsh_block(Path::new("/opt/reason-network"));
+        let moved = dsh_block(Path::new("/opt/oan"));
         let updated = dsh_patch_text(&with, &moved, false).unwrap().unwrap();
-        assert!(updated.contains("/opt/reason-network") && !updated.contains("/usr/local/bin"), "{updated}");
+        assert!(updated.contains("/opt/oan") && !updated.contains("/usr/local/bin"), "{updated}");
         assert_eq!(dsh_patch_text(&with, &block, true).unwrap().as_deref(), Some(DSH_PATCH), "removal restores it");
         assert_eq!(dsh_patch_text(DSH_PATCH, &block, true).unwrap(), None, "nothing to remove");
     }
 
     #[test]
     fn dsh_patch_stays_a_list_when_our_block_goes() {
-        let block = dsh_block(Path::new("/x/reason-network"));
+        let block = dsh_block(Path::new("/x/oan"));
         // What dsh ships: comments and an empty list. Without the list dsh refuses to start.
         let shipped = "# patch layer\n[]\n";
         let with = dsh_patch_text(shipped, &block, false).unwrap().unwrap();
@@ -1550,7 +1510,7 @@ mod tests {
 
     #[test]
     fn dsh_patch_only_takes_a_top_level_list() {
-        let block = dsh_block(Path::new("/x/reason-network"));
+        let block = dsh_block(Path::new("/x/oan"));
         // Appending to any of these would leave a file dsh can't parse.
         assert!(dsh_patch_text("  - id: a\n    name: b\n", &block, false).is_err(), "indented list");
         assert!(dsh_patch_text("---\n[]\n", &block, false).is_err(), "document marker");
@@ -1561,24 +1521,24 @@ mod tests {
 
     #[test]
     fn dsh_patch_leaves_a_server_of_the_users_own_alone() {
-        let block = dsh_block(Path::new("/x/reason-network"));
-        let own = "- insert:\n    - id: my-rn\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: reason-network\n";
+        let block = dsh_block(Path::new("/x/oan"));
+        let own = "- insert:\n    - id: my-rn\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: oan\n";
         let why = dsh_patch_text(own, &block, false).unwrap_err().to_string();
         assert!(why.contains("of your own"), "{why}");
         assert_eq!(dsh_patch_text(own, &block, true).unwrap(), None, "`--remove` leaves it");
         // However YAML quotes the name; a comment about it is not a server.
-        for quoted in ["\"reason-network\"", "'reason-network'", "reason-network # mine"] {
+        for quoted in ["\"oan\"", "'oan'", "oan # mine"] {
             let own = format!("- insert:\n    - config:\n        serverName: {quoted}\n");
             assert!(dsh_patch_text(&own, &block, false).is_err(), "{quoted}");
         }
-        let commented = "# serverName: reason-network\n- id: agent-loop\n";
+        let commented = "# serverName: oan\n- id: agent-loop\n";
         assert!(dsh_patch_text(commented, &block, false).unwrap().unwrap().contains(&block), "commented out");
-        assert!(!dsh_wired("# serverName: reason-network\n", Path::new("/x/reason-network")));
+        assert!(!dsh_wired("# serverName: oan\n", Path::new("/x/oan")));
     }
 
     #[test]
     fn dsh_patch_that_is_only_the_empty_list_round_trips() {
-        let block = dsh_block(Path::new("/x/reason-network"));
+        let block = dsh_block(Path::new("/x/oan"));
         let with = dsh_patch_text("[]\n", &block, false).unwrap().unwrap();
         assert_eq!(with, block, "no blank line above our block");
         assert_eq!(dsh_patch_text(&with, &block, true).unwrap().as_deref(), Some("[]\n"));
@@ -1586,42 +1546,42 @@ mod tests {
 
     #[test]
     fn dsh_wiring_is_found_through_the_yaml_quote() {
-        let exe = Path::new(r"C:\Users\O'Neil\reason-network.exe");
+        let exe = Path::new(r"C:\Users\O'Neil\oan.exe");
         let block = dsh_block(exe);
-        assert!(block.contains(r"'C:\Users\O''Neil\reason-network.exe'"), "{block}");
+        assert!(block.contains(r"'C:\Users\O''Neil\oan.exe'"), "{block}");
         assert!(dsh_wired(&block, exe));
-        assert!(!dsh_wired(&block, Path::new(r"C:\Users\other\reason-network.exe")));
+        assert!(!dsh_wired(&block, Path::new(r"C:\Users\other\oan.exe")));
         assert!(!dsh_wired("", exe));
     }
 
     #[test]
     #[cfg(unix)]
     fn quoting() {
-        assert_eq!(shell_cmd(Path::new("/usr/local/bin/reason-network"), "mcp"), "/usr/local/bin/reason-network mcp");
-        assert_eq!(shell_cmd(Path::new("/Users/a b/reason-network"), "mcp"), "'/Users/a b/reason-network' mcp");
+        assert_eq!(shell_cmd(Path::new("/usr/local/bin/oan"), "mcp"), "/usr/local/bin/oan mcp");
+        assert_eq!(shell_cmd(Path::new("/Users/a b/oan"), "mcp"), "'/Users/a b/oan' mcp");
     }
 
     #[test]
     #[cfg(windows)]
     fn quoting() {
         assert_eq!(
-            shell_cmd(Path::new(r"C:\Users\alex\.local\bin\reason-network.exe"), "mcp"),
-            r"C:\Users\alex\.local\bin\reason-network.exe mcp"
+            shell_cmd(Path::new(r"C:\Users\alex\.local\bin\oan.exe"), "mcp"),
+            r"C:\Users\alex\.local\bin\oan.exe mcp"
         );
         assert_eq!(
-            shell_cmd(Path::new(r"C:\Users\Alex O'Neil\reason-network.exe"), "mcp"),
-            r"& 'C:\Users\Alex O''Neil\reason-network.exe' mcp"
+            shell_cmd(Path::new(r"C:\Users\Alex O'Neil\oan.exe"), "mcp"),
+            r"& 'C:\Users\Alex O''Neil\oan.exe' mcp"
         );
-        assert_eq!(me(Path::new(r"C:\a\reason-network.exe")), r"C:\\a\\reason-network.exe");
+        assert_eq!(me(Path::new(r"C:\a\oan.exe")), r"C:\\a\\oan.exe");
     }
 
     #[test]
     #[cfg(windows)]
     fn paths_match_whatever_their_case() {
-        let exe = Path::new(r"D:\Program Files\reason-network\reason-network.exe");
-        assert!(ours(r"command = 'D:\program files\reason-network\reason-network.exe'", exe));
-        assert!(ours(r#""command": "d:\\PROGRAM FILES\\reason-network\\reason-network.exe""#, exe));
-        assert!(same_path(r"D:\program files\reason-network\reason-network.exe", exe));
-        assert!(!same_path(r"D:\program files\reason-network\other.exe", exe));
+        let exe = Path::new(r"D:\Program Files\oan\oan.exe");
+        assert!(ours(r"command = 'D:\program files\oan\oan.exe'", exe));
+        assert!(ours(r#""command": "d:\\PROGRAM FILES\\oan\\oan.exe""#, exe));
+        assert!(same_path(r"D:\program files\oan\oan.exe", exe));
+        assert!(!same_path(r"D:\program files\oan\other.exe", exe));
     }
 }

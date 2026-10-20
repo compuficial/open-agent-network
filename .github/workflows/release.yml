@@ -1,8 +1,8 @@
 name: release
 
-# Push a tag like v0.10.4 to build reason-network for macOS, Linux and Windows and publish a GitHub release, with the
-# install scripts a standalone install (and its updates) uses. The reason CLI pins the macOS and Linux archives' sha256.
-# Reason then replaces the macOS archives (and their .sha256) with Developer ID signed and notarized builds of the same
+# Push a tag like v0.10.4 to build oan for macOS, Linux and Windows and publish a GitHub release, with the
+# install scripts a standalone install (and its updates) uses. A signed macOS build is replaced only by
+# another build with the same TeamIdentifier, so macOS keeps the local-network answer. The workflow publishes
 # binaries, so macOS knows every release as one program. install.sh never puts an unsigned build over a signed one.
 on:
   push:
@@ -41,18 +41,18 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
-          tar -czf dist/reason-network-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release reason-network
-          cd dist && shasum -a 256 reason-network-${{ matrix.target }}.tar.gz > reason-network-${{ matrix.target }}.tar.gz.sha256
+          tar -czf dist/oan-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release oan
+          cd dist && shasum -a 256 oan-${{ matrix.target }}.tar.gz > oan-${{ matrix.target }}.tar.gz.sha256
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
-          $name = "reason-network-${{ matrix.target }}.zip"
+          $name = "oan-${{ matrix.target }}.zip"
           New-Item -ItemType Directory dist | Out-Null
-          Compress-Archive target/${{ matrix.target }}/release/reason-network.exe dist/$name
+          Compress-Archive target/${{ matrix.target }}/release/oan.exe dist/$name
           "$((Get-FileHash dist/$name -Algorithm SHA256).Hash.ToLower())  $name" | Out-File -Encoding ascii dist/$name.sha256
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: reason-network-${{ matrix.target }}
+          name: oan-${{ matrix.target }}
           path: dist/*
 
   release:

@@ -1,4 +1,5 @@
-//! install.sh on macOS never replaces a reason-network signed by a developer team with a build that team didn't sign:
+//! install.sh on macOS never replaces a oan signed by a developer team with a build that team didn't sign:
+// Modified by compuficial, 2026.
 //! macOS would take it for a new program and ask again whether it may reach the local network. Run with stand-ins
 //! for `uname` (a Mac) and `codesign` (which reads a `# team:` line from the file), and a local release.
 #![cfg(unix)]
@@ -10,15 +11,15 @@ fn script(path: &Path, body: &str) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// A reason-network stand-in at `version`, signed by `team` (None: ad hoc).
+/// A oan stand-in at `version`, signed by `team` (None: ad hoc).
 fn engine(path: &Path, version: &str, team: Option<&str>) {
     let team = team.map(|t| format!("# team: {t}\n")).unwrap_or_default();
-    script(path, &format!("{team}echo 'reason-network {version}'"));
+    script(path, &format!("{team}echo 'oan {version}'"));
 }
 
 /// Installs a release signed by `new` over one signed by `old`; returns whether it succeeded and the version left.
 fn update(name: &str, old: Option<&str>, new: Option<&str>) -> (bool, String) {
-    let root = std::env::temp_dir().join(format!("rn-install-{name}-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("oan-install-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     let (fake, release, bin) = (root.join("fake"), root.join("release"), root.join("bin"));
     for d in [&fake, &release, &bin] {
@@ -29,11 +30,11 @@ fn update(name: &str, old: Option<&str>, new: Option<&str>) -> (bool, String) {
         &fake.join("codesign"),
         r#"for f; do :; done; t="$(sed -n 's/^# team: //p' "$f")"; echo "TeamIdentifier=${t:-not set}" >&2"#,
     );
-    engine(&bin.join("reason-network"), "1.0.0", old);
-    engine(&release.join("reason-network"), "1.0.1", new);
-    let archive = "reason-network-aarch64-apple-darwin.tar.gz";
+    engine(&bin.join("oan"), "1.0.0", old);
+    engine(&release.join("oan"), "1.0.1", new);
+    let archive = "oan-aarch64-apple-darwin.tar.gz";
     let pack = format!(
-        "tar -czf {archive} reason-network && rm reason-network && \
+        "tar -czf {archive} oan && rm oan && \
          {{ shasum -a 256 {archive} 2>/dev/null || sha256sum {archive}; }} > {archive}.sha256"
     );
     assert!(Command::new("sh").arg("-c").arg(pack).current_dir(&release).status().unwrap().success());
@@ -43,25 +44,25 @@ fn update(name: &str, old: Option<&str>, new: Option<&str>) -> (bool, String) {
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
         .env("PATH", path)
         .env("HOME", &root)
-        .env("REASON_NETWORK_BIN_DIR", &bin)
-        .env("REASON_NETWORK_DOWNLOAD_BASE", format!("file://{}", release.display()))
-        .env("REASON_NETWORK_NO_PROMPT", "1")
+        .env("OAN_BIN_DIR", &bin)
+        .env("OAN_DOWNLOAD_BASE", format!("file://{}", release.display()))
+        .env("OAN_NO_PROMPT", "1")
         .output()
         .unwrap();
-    let left = Command::new(bin.join("reason-network")).output().unwrap();
+    let left = Command::new(bin.join("oan")).output().unwrap();
     let _ = fs::remove_dir_all(&root);
     (out.status.success(), String::from_utf8_lossy(&left.stdout).trim().to_string())
 }
 
 #[test]
 fn a_signed_install_takes_only_its_teams_builds() {
-    assert_eq!(update("same-team", Some("TEAM1"), Some("TEAM1")), (true, "reason-network 1.0.1".into()));
-    assert_eq!(update("unsigned", Some("TEAM1"), None), (false, "reason-network 1.0.0".into()));
-    assert_eq!(update("other-team", Some("TEAM1"), Some("TEAM2")), (false, "reason-network 1.0.0".into()));
+    assert_eq!(update("same-team", Some("TEAM1"), Some("TEAM1")), (true, "oan 1.0.1".into()));
+    assert_eq!(update("unsigned", Some("TEAM1"), None), (false, "oan 1.0.0".into()));
+    assert_eq!(update("other-team", Some("TEAM1"), Some("TEAM2")), (false, "oan 1.0.0".into()));
 }
 
 #[test]
 fn an_unsigned_install_takes_any_build() {
-    assert_eq!(update("was-unsigned", None, None), (true, "reason-network 1.0.1".into()));
-    assert_eq!(update("now-signed", None, Some("TEAM1")), (true, "reason-network 1.0.1".into()));
+    assert_eq!(update("was-unsigned", None, None), (true, "oan 1.0.1".into()));
+    assert_eq!(update("now-signed", None, Some("TEAM1")), (true, "oan 1.0.1".into()));
 }

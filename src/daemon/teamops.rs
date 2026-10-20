@@ -1,4 +1,5 @@
 //! Team membership and the network: create, join, invite, remove, leave; and what the network layer asks of us.
+// Modified by compuficial, 2026.
 
 use super::{Daemon, Inner, log};
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     util,
 };
 use anyhow::{Result, anyhow, bail};
-use iroh::{EndpointAddr, EndpointId};
+use iroh::EndpointId;
 use std::{collections::HashMap, collections::HashSet, sync::Arc, time::Duration};
 
 fn is_private(ip: std::net::IpAddr) -> bool {
@@ -51,8 +52,9 @@ impl Daemon {
 
     pub(super) async fn start_net(self: &Arc<Self>) -> Result<()> {
         let team = self.team_state().ok_or_else(|| anyhow!("not in a team"))?;
-        let relay = team.meta.body.relay.as_deref();
-        let endpoint = net::bind(self.key.clone(), relay, self.cfg.lan()).await?;
+        let relay = crate::fork::require_relay(team.meta.body.relay.as_deref())
+            .map_err(|e| anyhow!("{e}. Run `{CLI} relay <url>` to set a self-hosted relay."))?;
+        let endpoint = net::bind(self.key.clone(), Some(relay), self.cfg.lan()).await?;
         // Last known presence of each machine, so `who --all` shows offline teammates after a restart.
         let mut remote = HashMap::new();
         {
@@ -67,7 +69,7 @@ impl Daemon {
                 }
             }
         }
-        let net = Net::start(self, endpoint, relay, remote);
+        let net = Net::start(self, endpoint, Some(relay), remote);
         log(&format!("team {} · machine {}", team.name(), net.id().fmt_short()));
         *self.net.write().unwrap() = Some(net.clone());
         // Invite codes made here that are still good: listen for them again.
@@ -81,7 +83,7 @@ impl Daemon {
         };
         for (code, expires) in codes {
             if team.invite_unused(&invite::secret(&code)) {
-                net.listen_invite(invite::key(&code), expires, relay, self.cfg.lan()).await?;
+                net.listen_invite(invite::key(&code), expires, Some(relay), self.cfg.lan()).await?;
             } else {
                 self.inner.lock().unwrap().store.delete_prefix(&format!("code:{code}"))?;
             }
@@ -151,7 +153,7 @@ impl Daemon {
 
     /// Someone presented an invite (on the join protocol).
     pub fn redeem(self: &Arc<Self>, joiner: EndpointId, req: &JoinRequest) -> Result<TeamState> {
-        // Signed in to Reason: the name is the one Reason gave. (Expiry doesn't decide who joins: peers don't check it.)
+        // A sign-in proof, when present, supplies the name. (Expiry doesn't decide who joins: peers don't check it.)
         let proof = req.proof.as_deref().map(|p| proof::verify_ignoring_expiry(p, &joiner)).transpose()?;
         let person = proof.as_ref().map_or_else(|| util::slug(&req.person), |p| p.name.clone());
         let machine = util::slug(&req.machine);
@@ -201,10 +203,10 @@ impl Daemon {
         if let Some(p) = &proof {
             state.attest(&self.key.public(), p);
         }
-        if let Some(u) = &relay {
-            net::check_relay(self.key.clone(), u).await?;
-            state.set_relay(&self.key, relay.clone());
-        }
+        let relay_url = relay.or_else(|| crate::paths::env_var("RELAY").ok());
+        let relay_url = crate::fork::require_relay(relay_url.as_deref())?.to_string();
+        net::check_relay(self.key.clone(), &relay_url).await?;
+        state.set_relay(&self.key, Some(relay_url.clone()));
         {
             let mut g = self.inner.lock().unwrap();
             g.team = Some(state);
@@ -216,7 +218,7 @@ impl Daemon {
             id: self.team_id().unwrap_or_default(),
             name: name.into(),
             team_name: name.into(),
-            relay,
+            relay: Some(relay_url),
             relay_connected: None,
             person,
             machine: self.machine.clone(),
@@ -268,18 +270,20 @@ impl Daemon {
             bail!("your name needs letters or digits");
         }
         // A code points at the key the inviting machine listens on for it; a ticket lists machines.
-        let (team, secret, relay, peers) = match invite::normalize(invite_text) {
-            Some(code) => {
-                (String::new(), invite::secret(&code), None, vec![EndpointAddr::new(invite::key(&code).public())])
-            }
-            None if Ticket::is_ticket(invite_text) => {
-                let t = Ticket::decode(invite_text)?;
-                let addrs = t.addrs();
-                (t.team, t.secret, t.relay, addrs)
-            }
-            None => bail!("that's not an invite code (four words, like plum-tiger-lake-orbit)"),
+        if invite::normalize(invite_text).is_some() {
+            bail!("four-word codes are not available; paste the team link (it starts with rn1-)");
+        }
+        let (team, secret, relay, peers) = if Ticket::is_ticket(invite_text) {
+            let t = Ticket::decode(invite_text)?;
+            let relay = crate::fork::require_relay(t.relay.as_deref())
+                .map_err(|_| anyhow!("this team isn't self-hosted; the link must name your relay"))?
+                .to_string();
+            let addrs = t.addrs();
+            (t.team, t.secret, relay, addrs)
+        } else {
+            bail!("that's not a team link (it looks like rn1-…)");
         };
-        let endpoint = net::bind(self.key.clone(), relay.as_deref(), self.cfg.lan()).await?;
+        let endpoint = net::bind(self.key.clone(), Some(&relay), self.cfg.lan()).await?;
         let req = JoinRequest {
             team: team.clone(),
             secret,
@@ -345,7 +349,7 @@ impl Daemon {
         Ok(info)
     }
 
-    /// Attaches (or refreshes) this machine's Reason sign-in proof, for its teammates to check.
+    /// Attaches (or refreshes) this machine's sign-in proof, for its teammates to check.
     pub(super) fn attach_proof(self: &Arc<Self>, jws: &str) -> Result<String> {
         let me = self.key.public();
         let p = proof::verify(jws, &me)?;
@@ -393,20 +397,16 @@ impl Daemon {
             let ticket = self.ticket(team, secret);
             let state = team.clone();
             self.save_team(&g)?;
-            if state.meta.body.relay.is_none() {
-                g.store.set(&format!("code:{code}"), &expires.to_string())?;
-            }
             (state, ticket)
         };
         let relay = state.meta.body.relay.clone();
         net.broadcast(&Wire::State { state: Box::new(state) });
-        // Finding the machine behind a code takes n0's address lookup: a team with its own relay gets the long form.
-        if relay.is_some() {
-            let ticket = ticket.encode();
-            return Ok(InviteInfo { code: ticket.clone(), ticket, hours });
-        }
-        net.listen_invite(invite::key(&code), expires, relay.as_deref(), self.cfg.lan()).await?;
-        Ok(InviteInfo { code, ticket: ticket.encode(), hours })
+        let Some(relay) = relay else {
+            bail!("this team has no self-hosted relay; run `{CLI} relay <url>`");
+        };
+        let _ = (code, expires, relay);
+        let ticket = ticket.encode();
+        Ok(InviteInfo { code: ticket.clone(), ticket, hours })
     }
 
     /// A ticket for `secret`: this machine first, then a few teammates, so whoever is online can let them in.
@@ -594,6 +594,7 @@ impl Daemon {
     }
 
     pub(super) async fn set_relay(self: &Arc<Self>, url: Option<String>) -> Result<String> {
+        let url = Some(crate::fork::require_relay(url.as_deref())?.to_string());
         if let Some(u) = &url {
             net::check_relay(self.key.clone(), u).await?;
         }
@@ -617,13 +618,8 @@ impl Daemon {
             tokio::time::sleep(Duration::from_millis(800)).await;
         }
         self.restart_soon();
-        let (now, cmd) = match &url {
-            Some(u) => (format!("The team now uses relay {u}, and nothing of n0's."), format!("{CLI} relay {u}")),
-            None => (
-                format!("The team now uses relay {}.", crate::render::default_relays()),
-                format!("{CLI} relay default"),
-            ),
-        };
+        let u = url.clone().unwrap_or_default();
+        let (now, cmd) = (format!("The team now uses relay {u}."), format!("{CLI} relay {u}"));
         let mut out = format!("{now} Team links from before stop working: `{CLI} link` shows the new one.");
         // A machine that is off can't hear about it, and won't find the team where it looks when it's back.
         if !away.is_empty() {
@@ -659,6 +655,6 @@ mod tests {
         assert!(sign_in_needs_a_link(&code, Some("jws")).unwrap_err().to_string().contains("not a four-word code"));
         assert!(sign_in_needs_a_link(&code.replace('-', " "), Some("jws")).is_err());
         assert!(sign_in_needs_a_link(&code, None).is_ok(), "codes still work without signing in");
-        assert!(sign_in_needs_a_link("https://reasonmachines.com/network/join/#rn1-AAAA", Some("jws")).is_ok());
+        assert!(sign_in_needs_a_link("rn1-AAAA", Some("jws")).is_ok());
     }
 }
