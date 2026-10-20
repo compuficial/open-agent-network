@@ -1,5 +1,6 @@
 //! User-facing trees must not carry the upstream product name. Legal attribution stays in the
-//! license files and NOTICE. The refusal list in `src/fork.rs` names hosts only to reject them.
+//! license files, NOTICE, and the License section of README.md. The refusal list in `src/fork.rs`
+//! names hosts only to reject them.
 
 use std::path::Path;
 
@@ -21,7 +22,28 @@ fn allowed(path: &str, needle: &str) -> bool {
     if path == "docs/RELAY.md" && needle == "reasonmachines.com" {
         return true;
     }
+    // Apache-2.0 attribution: the upstream git path, and only that path. The License-section
+    // test below checks that README does not use it anywhere else.
+    if path == "README.md" && (needle == "reason-network" || needle == "reason-machines") {
+        return true;
+    }
     false
+}
+
+#[test]
+fn readme_names_the_upstream_repo_only_in_the_license_section() {
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md")).unwrap();
+    let Some((body, tail)) = text.rsplit_once("\n## License\n") else {
+        panic!("README needs a License section for the Apache-2.0 attribution");
+    };
+    for needle in NEEDLES {
+        assert!(!body.contains(needle), "README above the License section contains {needle}");
+    }
+    assert!(tail.contains("https://github.com/reason-machines/reason-network"), "{tail}");
+    assert!(tail.contains("v0.12.0"), "{tail}");
+    for needle in ["Reason Network", "Reason Machines", "reasonmachines.com"] {
+        assert!(!tail.contains(needle), "README license section contains {needle}");
+    }
 }
 
 #[test]
