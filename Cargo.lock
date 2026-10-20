@@ -2655,6 +2655,7 @@ dependencies = [
  "ring",
  "rmcp",
  "rusqlite",
+ "rustls-pki-types",
  "schemars",
  "serde",
  "serde_json",

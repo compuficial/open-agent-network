@@ -41,15 +41,43 @@ Limit who can connect, if you want, with `iroh-relay`'s access controls to the r
 
 ## Railway (HTTPS only)
 
-Railway's public edge terminates TLS and forwards TCP. It does not hand you a public UDP port, so do not
-publish UDP 7842 there and expect the internet to reach it.
+Railway runs the container in [deploy/railway](../deploy/railway). The public edge terminates TLS on 443
+and forwards plain HTTP to the container's `PORT`. WebSocket connections, which is how iroh relays when
+it cannot use UDP, stay open. There is no inbound UDP, so the image does not advertise QUIC address
+discovery and does not bind UDP 7842.
 
-1. Deploy `iroh-relay` listening on the `PORT` Railway sets (HTTP, behind the edge).
-2. Generate a Railway domain. The public URL is `https://<name>.up.railway.app`.
-3. Pass that HTTPS URL to `oan init --relay` and `oan relay`.
+The image builds `iroh-relay` at the version locked next to `iroh` in `Cargo.lock` (1.3.0). It listens
+on `0.0.0.0:$PORT`, with metrics and QUIC turned off. `GET /healthz` returns JSON when the process is up.
+`railway.json` and `railway.toml` in that directory are the same service settings.
 
-Peers will relay over TCP through the edge. That is the supported Railway shape. A VM is the better
-default when you can open UDP.
+Service settings for the template:
+
+| Setting | Value |
+| --- | --- |
+| Root directory | `deploy/railway` |
+| Dockerfile path | `Dockerfile` |
+| Config file | `railway.json` or `railway.toml` (same settings) |
+| Healthcheck path | `/healthz` |
+| Healthcheck timeout | 120 seconds |
+| Public port | 443 at Railway's edge. Do not publish UDP. |
+| Container port | The `PORT` Railway injects. The process binds it. Leave `PORT` unset in the variables UI. |
+| Required variables | None. `PORT` is injected. `RUST_LOG` is optional and only changes `iroh-relay` logs. |
+
+Generate a Railway domain. The URL teammates use is `https://<name>.up.railway.app` (no port):
+
+```sh
+oan init my-team --as alice --relay https://<name>.up.railway.app
+```
+
+The README has a Deploy on Railway button. Its link is a placeholder until the template exists
+(`<!-- TEMPLATE_URL -->`).
+
+Peers who cannot reach each other directly relay over that HTTPS connection. It is slower than a VM
+that also publishes UDP 7842, and the relay still cannot read messages. A direct QUIC path is still
+used when the two machines can open one.
+
+`deploy/railway/smoke.sh` runs this shape on the local machine: the image behind a TLS-terminating
+proxy, and two `oan` daemons using the `https://` URL. It is not part of CI.
 
 ## Local
 

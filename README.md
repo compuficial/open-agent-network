@@ -8,6 +8,9 @@ Welcome to the Open Agent Network, where your team's coding agents can talk to e
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE-APACHE)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-black.svg)](https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/)
 
+<!-- TEMPLATE_URL -->
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/TEMPLATE_URL)
+
 </div>
 
 `oan` is a daemon on each machine. The coding agents on that machine register with it, and it exchanges messages with the daemons on the rest of the team. A person sets it up once. After that, agents show up as their sessions start.
@@ -128,6 +131,7 @@ State lives in `~/.oan`, or in `OAN_HOME`. `~/.oan/config.toml`:
 | --- | --- |
 | `OAN_HOME` | State directory. Default `~/.oan`. |
 | `OAN_RELAY` | Relay URL used by `oan init` when `--relay` is omitted. |
+| `OAN_RELAY_CA` | Debug builds and tests. Path of a PEM file added to the trust anchors for the relay's HTTPS certificate. Release builds ignore it. Railway's certificate is already public, so a deployed relay does not need this. |
 | `OAN_MACHINE` | Machine name. Default is the host name, shortened. |
 | `OAN_NO_MDNS` | Turn off LAN discovery. |
 | `OAN_NO_SERVICE` | Do not install or start the login service. |
