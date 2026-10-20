@@ -9,6 +9,8 @@ use crate::{
     team::TeamState,
     util,
 };
+#[cfg(any(debug_assertions, test))]
+use anyhow::Context;
 use anyhow::{Result, anyhow, bail};
 use futures_lite::{StreamExt, stream::Boxed};
 use iroh::{
@@ -144,10 +146,43 @@ pub async fn bind(key: SecretKey, relay: Option<&str>, lan: bool) -> Result<Endp
     let url: RelayUrl =
         url.parse().map_err(|_| anyhow!("not a relay url: {url} (expected e.g. https://relay.example.com)"))?;
     let mut b = Endpoint::builder(presets::Minimal).secret_key(key.clone()).relay_mode(RelayMode::custom([url]));
+    b = with_relay_ca(b)?;
     if lan {
         b = b.address_lookup(NoRelays(MdnsAddressLookup::builder().build(key.public())?));
     }
     Ok(b.bind().await?)
+}
+
+/// Debug and test builds can add PEM trust anchors (`OAN_RELAY_CA`) for a relay behind a private CA.
+/// Release builds keep the built-in public roots and ignore the variable. Railway's edge certificate is public,
+/// so a normal deploy does not set this.
+fn with_relay_ca(builder: iroh::endpoint::Builder) -> Result<iroh::endpoint::Builder> {
+    #[cfg(not(any(debug_assertions, test)))]
+    {
+        Ok(builder)
+    }
+    #[cfg(any(debug_assertions, test))]
+    {
+        let Some(path) = std::env::var_os("OAN_RELAY_CA") else {
+            return Ok(builder);
+        };
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("OAN_RELAY_CA {}", std::path::Path::new(&path).display()))?;
+        let roots = pem_certs(&bytes)?;
+        Ok(builder.ca_tls_config(iroh::tls::CaTlsConfig::embedded().with_extra_roots(roots)))
+    }
+}
+
+#[cfg(any(debug_assertions, test))]
+fn pem_certs(bytes: &[u8]) -> Result<Vec<rustls_pki_types::CertificateDer<'static>>> {
+    use rustls_pki_types::pem::PemObject;
+    let certs = rustls_pki_types::CertificateDer::pem_slice_iter(bytes)
+        .map(|item| item.map(|cert| cert.into_owned()).map_err(|err| anyhow!("OAN_RELAY_CA: {err}")))
+        .collect::<Result<Vec<_>>>()?;
+    if certs.is_empty() {
+        bail!("OAN_RELAY_CA contained no certificates");
+    }
+    Ok(certs)
 }
 
 /// Makes sure this machine reaches `url` as a relay. A mistyped or unreachable relay would cut the team off.
@@ -863,5 +898,13 @@ mod tests {
         let older: Presence = serde_json::from_str(r#"{"sessions":[],"known":[]}"#).unwrap();
         assert!(!older.has("files"));
         assert!(tidy_presence(Presence { features: vec!["files".into()], ..Default::default() }).has("files"));
+    }
+
+    #[test]
+    fn a_relay_ca_file_has_to_be_a_pem_certificate() {
+        let err = pem_certs(b"not a certificate").unwrap_err().to_string();
+        assert!(err.contains("OAN_RELAY_CA"), "{err}");
+        let err = pem_certs(b"").unwrap_err().to_string();
+        assert!(err.contains("no certificates"), "{err}");
     }
 }
