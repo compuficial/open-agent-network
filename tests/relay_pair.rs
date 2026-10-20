@@ -202,6 +202,11 @@ fn list_foreign() -> Result<Vec<String>, String> {
 fn peers_from_lsof(text: &str) -> Vec<String> {
     let mut found = Vec::new();
     for line in text.lines() {
+        // COMMAND is the binary name. Other processes on the machine are not this daemon.
+        let Some(cmd) = line.split_whitespace().next() else { continue };
+        if cmd != "oan" {
+            continue;
+        }
         let Some((_, remote)) = line.split_once("->") else { continue };
         let addr = remote.split_whitespace().next().unwrap_or("");
         if let Some(peer) = keep_foreign(addr) {
@@ -245,11 +250,12 @@ fn macos_foreign() -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
     let mut cmd = std::process::Command::new("lsof");
-    cmd.arg("-nP");
+    // `-a` ANDs the pid list with `-i`. Without it, lsof ORs them and prints every
+    // internet socket on the machine.
+    cmd.args(["-nP", "-a", "-i"]);
     for pid in &pids {
         cmd.arg("-p").arg(pid.to_string());
     }
-    cmd.arg("-i");
     let out = cmd.output().map_err(|e| format!("lsof: {e}"))?;
     // lsof exits 1 when the process has no matching sockets. That is an empty table, not a failure.
     if !out.status.success() && out.stdout.is_empty() {
@@ -442,6 +448,7 @@ oan 42 u 14u IPv4 0x1 0t0 TCP 127.0.0.1:50000->127.0.0.1:80 (ESTABLISHED)
 oan 42 u 15u IPv4 0x2 0t0 TCP 127.0.0.1:50001->8.8.8.8:53 (SYN_SENT)
 oan 42 u 16u IPv6 0x3 0t0 TCP [::1]:50003->[2001:db8::1]:443 (ESTABLISHED)
 oan 42 u 17u IPv4 0x4 0t0 UDP *:5353
+Runner 7 u 3u IPv4 0x5 0t0 TCP 10.1.0.2:40000->140.82.112.23:443 (ESTABLISHED)
 ";
     assert_eq!(peers_from_lsof(lsof), vec!["8.8.8.8:53".to_string(), "[2001:db8::1]:443".to_string()]);
 
