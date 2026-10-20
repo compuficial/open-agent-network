@@ -1,11 +1,12 @@
-//! A machine that ran tincan on its own moves over once. tincan's last update installed reason-network beside it,
+//! A machine that ran tincan on its own moves over once. tincan's last update installed oan beside it,
+// Modified by compuficial, 2026.
 //! with a copy under the old name for what still starts that: the old login service, agents' configs, and the old
 //! updater checking the version. `paths` has already moved the state; the daemon's first start here rewires the
 //! agents and swaps the login service. Agent sessions started before keep working until they end.
 
 use crate::{AGENT_NAME, LEGACY_NAME, paths, setup, util};
 
-/// Started under the old name, runs as reason-network instead, so everything after this is our own binary.
+/// Started under the old name, runs as oan instead, so everything after this is our own binary.
 pub fn as_ours() {
     let Ok(me) = util::current_exe() else { return };
     let ours = me.with_file_name(format!("{AGENT_NAME}{}", std::env::consts::EXE_SUFFIX));
@@ -48,9 +49,7 @@ pub async fn run(log: fn(&str)) {
     // Only tincan's last update leaves this: a copy of this very binary under the old name. Anything else called tincan
     // (a tincan of its own, a script) isn't ours to move. Once moved, it's a link to us, or gone.
     let copy = waiting(&exe);
-    // Where the Reason CLI's engine is installed too, it owns the agents and the service.
-    let reason_cli = paths::user_home().join(".reason").join("bin").join(exe.file_name().unwrap_or_default()).exists();
-    if util::from_source() || crate::managed() || reason_cli || !copy {
+    if util::from_source() || crate::managed() || !copy {
         return;
     }
     let out = setup::apply(&exe, &setup::legacy_wiring(&exe), &[], None, false).await;

@@ -1,4 +1,5 @@
-//! Where Reason Network keeps its state: `~/.reason/network`, or `REASON_NETWORK_HOME` (handy for running two
+//! Where Open Agent Network keeps its state: `~/.oan`, or `OAN_HOME` (handy for running two
+// Modified by compuficial, 2026.
 //! "machines" side by side). On Windows, `~` is the profile folder.
 //!
 //! Builds before 0.10.1 kept it in `~/.<LEGACY_NAME>` (or `TINCAN_HOME`) as `<LEGACY_NAME>.db` and `.sock`. [`migrate`]
@@ -14,14 +15,13 @@ pub fn user_home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// A setting from the environment: `REASON_NETWORK_<name>`, else the name earlier builds read (which earlier Reason
-/// CLIs and agent configs set).
+/// A setting from the environment: `OAN_<name>`, else the name earlier builds read (`TINCAN_<name>`).
 pub fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(format!("REASON_NETWORK_{name}")).or_else(|_| std::env::var(legacy_env(name)))
+    std::env::var(format!("OAN_{name}")).or_else(|_| std::env::var(legacy_env(name)))
 }
 
 pub fn env_var_os(name: &str) -> Option<std::ffi::OsString> {
-    std::env::var_os(format!("REASON_NETWORK_{name}")).or_else(|| std::env::var_os(legacy_env(name)))
+    std::env::var_os(format!("OAN_{name}")).or_else(|| std::env::var_os(legacy_env(name)))
 }
 
 fn legacy_env(name: &str) -> String {
@@ -29,7 +29,7 @@ fn legacy_env(name: &str) -> String {
 }
 
 fn default_home() -> PathBuf {
-    user_home().join(".reason").join("network")
+    user_home().join(crate::fork::HOME_DIR)
 }
 
 fn legacy_home() -> PathBuf {
@@ -60,8 +60,8 @@ fn stem(home: &Path) -> &'static str {
     }
 }
 
-/// `~/.reason/network/network.sock`, unless that is too long for a Unix socket address (104 bytes on macOS): then a
-/// short path in a private `/tmp/reason-network-<uid>` directory, derived from the home directory so every client
+/// `~/.oan/network.sock`, unless that is too long for a Unix socket address (104 bytes on macOS): then a
+/// short path in a private `/tmp/oan-<uid>` directory, derived from the home directory so every client
 /// agrees on it.
 #[cfg(unix)]
 pub fn socket() -> PathBuf {
@@ -84,12 +84,12 @@ pub fn socket() -> PathBuf {
     pipe_in(&home())
 }
 
-/// Named for the directory as Windows knows it, not as it was spelled: `C:/Users/alex/.reason/network` and
-/// `c:\users\alex\.reason\network\` are one directory, with one lock file, so they must be one pipe. (Before the
+/// Named for the directory as Windows knows it, not as it was spelled: `C:/Users/alex/.oan` and
+/// `c:\users\alex\.oan\` are one directory, with one lock file, so they must be one pipe. (Before the
 /// directory exists, as spelled; the daemon creating it names the pipe by what it then finds.)
 #[cfg(windows)]
 fn pipe_in(home: &Path) -> PathBuf {
-    let stem = if stem(home) == LEGACY_NAME { LEGACY_NAME } else { "reason-network" };
+    let stem = if stem(home) == LEGACY_NAME { LEGACY_NAME } else { crate::fork::SHORT_NAME };
     let dir = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
     let dir = dir.to_str().and_then(|s| s.strip_prefix(r"\\?\")).map_or(dir.clone(), PathBuf::from);
     PathBuf::from(format!(r"\\.\pipe\{stem}-{:016x}", hash(&dir)))
@@ -105,7 +105,7 @@ fn hash(path: &Path) -> u64 {
 
 #[cfg(unix)]
 fn short_dir(stem: &str) -> PathBuf {
-    let name = if stem == LEGACY_NAME { LEGACY_NAME } else { "reason-network" };
+    let name = if stem == LEGACY_NAME { LEGACY_NAME } else { crate::fork::SHORT_NAME };
     PathBuf::from(format!("/tmp/{name}-{}", unsafe { libc::getuid() }))
 }
 
@@ -133,7 +133,7 @@ fn migrate_unix() -> std::io::Result<()> {
     if !folder() && !files() {
         return Ok(());
     }
-    let dir = user_home().join(".reason");
+    let dir = default_home();
     std::fs::create_dir_all(&dir)?;
     let Some(_moving) = crate::util::lock(&dir.join(".network-move.lock"), true)? else { return Ok(()) };
     if folder() {
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn every_spelling_of_the_home_names_one_pipe() {
-        let dir = std::env::temp_dir().join(format!("reason-network-home-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oan-home-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let spelled = dir.to_str().unwrap();
         let slashes = spelled.replace('\\', "/");

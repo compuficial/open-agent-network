@@ -1,4 +1,5 @@
 //! Team membership: a small replicated state (team metadata, member machines, invites) in which every entry is
+// Modified by compuficial, 2026.
 //! signed by a member machine's key. Any member can add or remove machines and issue invites; entries merge
 //! last-writer-wins by timestamp. Built for a team of friends who trust each other, not adversarial members.
 
@@ -45,8 +46,7 @@ impl<T: Serialize> Signed<T> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Meta {
     pub name: String,
-    /// A self-hosted iroh relay for the team (`https://relay.example.com`), which is then all its machines use: they
-    /// never contact n0. Reason's otherwise (see `relays`; an older Reason Network uses n0's).
+    /// The team's self-hosted iroh relay (`https://relay.example.com`). Required. Machines use only this URL.
     pub relay: Option<String>,
     pub ts: i64,
 }
@@ -65,7 +65,7 @@ pub struct Invite {
     /// blake3 of the secret; the secret itself only travels in the ticket.
     pub hash: String,
     pub expires: i64,
-    /// Set for `reason network invite --me`: only this person can redeem it (adding a machine of their own).
+    /// Set for `oan invite --me`: only this person can redeem it (adding a machine of their own).
     pub person: Option<String>,
     pub used_by: Option<EndpointId>,
     pub ts: i64,
@@ -74,7 +74,7 @@ pub struct Invite {
     pub reusable: bool,
 }
 
-/// The team link's secret, known to every member so any of them can show the link (`reason network link`).
+/// The team link's secret, known to every member so any of them can show the link (`oan link`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Link {
     pub secret: String,
@@ -96,14 +96,14 @@ pub struct TeamState {
     pub invites: BTreeMap<String, Signed<Invite>>,
     #[serde(default)]
     pub link: Option<Signed<Link>>,
-    /// Each machine's Reason sign-in proof (a JWS, see [`crate::proof`]), by endpoint id. It signs itself, so it stays
+    /// Each machine's sign-in proof (a JWS, see [`crate::proof`]), by endpoint id. It signs itself, so it stays
     /// out of the signed entries, and builds that don't know it pass the rest of the state on unchanged.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub attestations: BTreeMap<String, String>,
 }
 
 /// A join refused because one of the person's own computers should let this one in (another computer of the same
-/// Reason account): the joiner asks the ticket's other machines.
+/// account): the joiner asks the ticket's other machines.
 pub const SAME_ACCOUNT: &str = "same_account_needs_owner";
 
 /// Entries stamped further ahead than this are refused (a broken clock, or worse).
@@ -175,14 +175,14 @@ impl TeamState {
     }
 
     /// Whether `endpoint` may be an active machine of `person`, on `signer`'s word: one of the person's machines vouches
-    /// for it, nobody else has the name, or Reason says it belongs to the account that holds the name.
+    /// for it, nobody else has the name, or the proof says it belongs to the account that holds the name.
     fn may_take(&self, person: &str, endpoint: &EndpointId, signer: &EndpointId) -> bool {
         self.active().any(|m| m.endpoint == *signer && m.person == person)
             || !self.active().any(|m| m.person == person && m.endpoint != *endpoint)
             || self.signed_proof(endpoint).is_some_and(|p| self.same_account(person, &p, endpoint))
     }
 
-    /// Whether `p` (the proof of `endpoint`) is for `person`, and from the Reason account another of `person`'s machines
+    /// Whether `p` (the proof of `endpoint`) is for `person`, and from the account another of `person`'s machines
     /// holds the name with. Expiry doesn't count here: who holds a name mustn't change as time passes.
     pub fn same_account(&self, person: &str, p: &Proof, endpoint: &EndpointId) -> bool {
         p.name == person
@@ -208,7 +208,7 @@ impl TeamState {
         self.member(endpoint).is_some_and(|m| self.proof(endpoint).is_some_and(|p| p.name == m.person))
     }
 
-    /// Verified people: each name an active machine has a proof for, good now, with the Reason account it belongs to.
+    /// Verified people: each name an active machine has a proof for, good now, with the account it belongs to.
     /// It's per person: all of a verified person's machines show as theirs.
     pub fn verified_people(&self) -> HashMap<String, String> {
         self.active()
@@ -217,7 +217,7 @@ impl TeamState {
             .collect()
     }
 
-    /// Records `endpoint`'s sign-in proof, if it is Reason's (expired or not) and newer than the one it has (issued later;
+    /// Records `endpoint`'s sign-in proof, if it is the network's (expired or not) and newer than the one it has (issued later;
     /// the same second, the greater JWS, so every machine keeps the same one); true if it was taken.
     pub fn attest(&mut self, endpoint: &EndpointId, jws: &str) -> bool {
         let jws = jws.trim();
@@ -525,9 +525,8 @@ pub struct Ticket {
 const TICKET_PREFIX: &str = "rn1-";
 /// What earlier builds wrote: still read.
 const OLD_TICKET_PREFIX: &str = "tincan1";
-/// In place of a length: an n0 relay, given by its region (`use1-1` for `https://use1-1.relay.n0.iroh.link./`).
+/// In place of a length: a compact public-relay marker from other builds. This build refuses those tickets.
 const N0_RELAY: u8 = 0xFF;
-const N0_RELAY_SUFFIX: &str = ".relay.n0.iroh.link./";
 
 /// A length byte, then the text (cut to 250 bytes, so a length never reads as a marker).
 fn put_text(b: &mut Vec<u8>, text: &str) {
@@ -537,13 +536,6 @@ fn put_text(b: &mut Vec<u8>, text: &str) {
     }
     b.push(n as u8);
     b.extend(&text.as_bytes()[..n]);
-}
-
-fn n0_relay(url: &str) -> Option<&str> {
-    let host = url.strip_prefix("https://")?.trim_end_matches('/');
-    let region = host.strip_suffix(".relay.n0.iroh.link.").or_else(|| host.strip_suffix(".relay.n0.iroh.link"))?;
-    (!region.is_empty() && region.len() < 32 && region.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
-        .then_some(region)
 }
 
 impl Ticket {
@@ -557,15 +549,7 @@ impl Ticket {
         let name: String = self.name.chars().take(60).collect();
         put_text(&mut b, &name);
         for relay in [&self.relay, &self.hint_relay] {
-            let relay = relay.as_deref().unwrap_or("");
-            match n0_relay(relay) {
-                // One of n0's relays: just its region, which keeps links short.
-                Some(region) => {
-                    b.push(N0_RELAY);
-                    put_text(&mut b, region);
-                }
-                None => put_text(&mut b, relay),
-            }
+            put_text(&mut b, relay.as_deref().unwrap_or(""));
         }
         let ips: Vec<&SocketAddr> = self.hint_ips.iter().take(2).collect();
         b.push(ips.len() as u8);
@@ -598,7 +582,7 @@ impl Ticket {
         let data = s
             .strip_prefix(TICKET_PREFIX)
             .or_else(|| s.strip_prefix(OLD_TICKET_PREFIX))
-            .ok_or_else(|| anyhow!("not a Reason Network invite"))?;
+            .ok_or_else(|| anyhow!("not a Open Agent Network invite"))?;
         let b =
             BASE64URL_NOPAD.decode(data.as_bytes()).map_err(|_| anyhow!("this invite is damaged (was it cut off?)"))?;
         let damaged = || anyhow!("this invite is damaged (was it cut off?)");
@@ -613,8 +597,7 @@ impl Ticket {
         let mut text = || -> Result<String> {
             let n = take(1)?[0];
             if n == N0_RELAY {
-                let n = take(1)?[0] as usize;
-                return Ok(format!("https://{}{N0_RELAY_SUFFIX}", String::from_utf8_lossy(take(n)?)));
+                bail!("this invite names a public relay; use a team link for your self-hosted relay");
             }
             Ok(String::from_utf8_lossy(take(n as usize)?).into_owned())
         };
@@ -897,14 +880,14 @@ mod tests {
             name: "the boys".into(),
             secret: random_secret(),
             relay: Some("https://relay.example.com".into()),
-            hint_relay: Some("https://euc1-1.relay.n0.iroh.link./".into()),
+            hint_relay: Some("https://hint.example/".into()),
             hint_ips: vec!["192.168.1.20:51234".parse().unwrap(), "[fe80::1]:51234".parse().unwrap()],
             peers: vec![a.public(), b.public()],
         };
         let enc = t.encode();
         assert!(enc.len() < 300, "short enough for a link: {}", enc.len());
         assert_eq!(t.addrs()[0].ip_addrs().count(), 2);
-        // Every peer through the team's own relay, never the n0 relay the hint names.
+        // Every peer through the team's own relay. A hint's relay URL is not used.
         for a in t.addrs() {
             assert_eq!(a.relay_urls().map(|u| u.to_string()).collect::<Vec<_>>(), ["https://relay.example.com/"]);
         }
@@ -917,38 +900,34 @@ mod tests {
     }
 
     #[test]
-    fn links_name_n0_relays_by_region_and_old_links_still_work() {
+    fn a_public_relay_marker_is_refused_and_old_links_still_read() {
         let a = key();
-        let mut t = Ticket {
+        let t = Ticket {
             team: "00112233445566778899aabbccddeeff".into(),
             name: "vibes".into(),
             secret: random_secret(),
-            relay: None,
-            hint_relay: Some("https://use1-1.relay.n0.iroh.link./".into()),
+            relay: Some("https://relay.example/".into()),
+            hint_relay: None,
             hint_ips: vec![],
             peers: vec![a.public()],
         };
-        let short = t.encode();
-        assert_eq!(Ticket::decode(&short).unwrap(), t);
-        // The same link as 0.5 wrote it, with the relay spelled out.
+        assert_eq!(Ticket::decode(&t.encode()).unwrap(), t);
         let mut b = HEXLOWER.decode(t.team.as_bytes()).unwrap();
         b.extend(HEXLOWER.decode(t.secret.as_bytes()).unwrap());
-        for f in ["vibes", "", "https://use1-1.relay.n0.iroh.link./"] {
-            put_text(&mut b, f);
-        }
+        put_text(&mut b, "vibes");
+        b.push(N0_RELAY);
+        put_text(&mut b, "use1-1");
+        put_text(&mut b, "");
         b.push(0);
         b.extend(a.public().as_bytes());
-        let old = format!("{OLD_TICKET_PREFIX}{}", BASE64URL_NOPAD.encode(&b));
-        assert!(short.len() + 30 < old.len(), "{} vs {}", short.len(), old.len());
-        assert_eq!(Ticket::decode(&old).unwrap(), t);
-        t.hint_relay = Some("https://relay.example.com/".into());
-        assert_eq!(Ticket::decode(&t.encode()).unwrap(), t);
+        let marked = format!("{TICKET_PREFIX}{}", BASE64URL_NOPAD.encode(&b));
+        assert!(Ticket::decode(&marked).unwrap_err().to_string().contains("public relay"));
     }
 
     #[test]
     fn a_link_from_a_machine_on_the_default_relay_names_it_as_a_hint() {
         let (a, b, c) = (key(), key(), key());
-        let default = crate::net::default_relays()[0].to_string();
+        let default = "https://relay.example/".to_string();
         let t = Ticket {
             team: "00112233445566778899aabbccddeeff".into(),
             name: "vibes".into(),
@@ -1005,12 +984,9 @@ mod tests {
         };
         let enc = t.encode();
         let payload = enc.strip_prefix("rn1-").expect("emitted as rn1-");
-        for link in [
-            enc.clone(),
-            format!("https://reasonmachines.com/network/join/#{enc}"),
-            format!("tincan1{payload}"),
-            format!("https://reasonmachines.com/network/join/#tincan1{payload}"),
-        ] {
+        for link in
+            [enc.clone(), format!("  {enc}\n"), format!("https://example.com/join/#{enc}"), format!("tincan1{payload}")]
+        {
             assert_eq!(Ticket::decode(&link).unwrap(), t, "{link}");
         }
         assert!(Ticket::decode(&format!("rn2-{payload}")).is_err());
@@ -1101,7 +1077,7 @@ mod tests {
         assert!(err.to_string().contains("already in this team"), "{err}");
     }
 
-    /// A proof as Reason signs it, expiring `ttl` seconds from now (in the past when negative).
+    /// A proof as signed it, expiring `ttl` seconds from now (in the past when negative).
     fn proof_for(sub: &str, name: &str, k: &SecretKey, ttl: i64) -> String {
         let mut c = crate::proof::tests::claims(sub, name, &k.public());
         c["exp"] = serde_json::json!(util::now_ms() / 1000 + ttl);
@@ -1185,7 +1161,7 @@ mod tests {
         let a = key();
         let s = TeamState::found("vibes", "alex", "mbp", &a);
         let (mut p, mut q) = (s.clone(), s.clone());
-        // Two proofs Reason issued in the same second (same iat, other claims differ).
+        // Two proofs issued in the same second (same iat, other claims differ).
         assert!(p.attest(&a.public(), &proof_for("u_alex", "alex", &a, 3600)));
         assert!(q.attest(&a.public(), &proof_for("u_alex", "alex", &a, 7200)));
         assert_ne!(p.attestations, q.attestations);

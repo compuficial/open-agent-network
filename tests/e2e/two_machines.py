@@ -1,17 +1,15 @@
-"""Two 'machines' (two REASON_NETWORK_HOMEs) on one box, talking over iroh, with simulated agent sessions.
+"""Older hosted-flow script. This build has no public relay and will not run it.
 
-    cargo build && env -u CLAUDE_CODE_MESSAGING_SOCKET python3 tests/e2e/two_machines.py
-
-Needs internet (iroh relays/discovery). Run inside a Claude Code session, the simulated Claude session pushes its
-test messages into that real session (they say "ignore this").
+The local pair check is `cargo test --test relay_pair`.
 """
+raise SystemExit("this build has no public relay; run cargo test --test relay_pair")
 import base64, json, os, re, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from proofs import TRUST, keygen, proof, serve_relay_lists
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-BIN = os.path.join(ROOT, "target", "debug", "reason-network")
-D = tempfile.mkdtemp(prefix="reason-network-e2e-")
+BIN = os.path.join(ROOT, "target", "debug", "oan")
+D = tempfile.mkdtemp(prefix="oan-e2e-")
 H = {"alex": os.path.join(D, "alex"), "alice": os.path.join(D, "alice")}
 MACHINE = {"alex": "laptop", "alice": "desktop"}
 FAKE_CODEX = os.path.join(D, "fake-codex.sh")
@@ -22,7 +20,7 @@ IN_CLAUDE = "CLAUDE_CODE_MESSAGING_SOCKET" in os.environ
 # First on PATH: nothing here may open a browser or reach this machine's real notifications.
 FAKE_BIN = os.path.join(D, "bin")
 UNEXPECTED = os.path.join(D, "unexpected.log")
-# Reason's relay list, served here: never the real one.
+# the network's relay list, served here: never the real one.
 RELAYS_URL = serve_relay_lists({"all": ["sfo1", "iad1", "fra1", "sin1"]}) + "/all.json"
 results = []
 
@@ -33,16 +31,16 @@ def check(name, ok, detail=""):
 
 
 def env(who, strip_claude=True):
-    e = dict(os.environ, REASON_NETWORK_HOME=H[who], REASON_NETWORK_MACHINE=MACHINE[who], REASON_NETWORK_NO_MDNS="1", REASON_NETWORK_NO_SERVICE="1", REASON_NETWORK_CODEX_BIN=FAKE_CODEX)
-    e.update({"HOME": os.path.join(D, "home"), "PATH": FAKE_BIN + os.pathsep + os.environ["PATH"], "REASON_NETWORK_NO_UPDATE": "1",
-              "REASON_NETWORK_NO_TRAY": "1", "REASON_NETWORK_TRUST_KEYS": TRUST, "REASON_NETWORK_RELAYS_URL": RELAYS_URL})
-    e.update({"REASON_NETWORK_OSASCRIPT_BIN": FAKE_NOTIFY, "REASON_NETWORK_NOTIFY-SEND_BIN": FAKE_NOTIFY, "DBUS_SESSION_BUS_ADDRESS": "test",
+    e = dict(os.environ, OAN_HOME=H[who], OAN_MACHINE=MACHINE[who], OAN_NO_MDNS="1", OAN_NO_SERVICE="1", OAN_CODEX_BIN=FAKE_CODEX)
+    e.update({"HOME": os.path.join(D, "home"), "PATH": FAKE_BIN + os.pathsep + os.environ["PATH"], "OAN_NO_UPDATE": "1",
+              "OAN_NO_TRAY": "1", "OAN_TRUST_KEYS": TRUST, "OAN_RELAYS_URL": RELAYS_URL})
+    e.update({"OAN_OSASCRIPT_BIN": FAKE_NOTIFY, "OAN_NOTIFY-SEND_BIN": FAKE_NOTIFY, "DBUS_SESSION_BUS_ADDRESS": "test",
               "NOTIFY_LOG": os.path.join(D, f"notify-{who}.log")})
     if strip_claude:
         for k in list(e):
             if k.startswith("CLAUDE"):
                 del e[k]
-    # Never this machine's real Claude sessions: Reason Network could deliver into them.
+    # Never this machine's real Claude sessions: Open Agent Network could deliver into them.
     e["CLAUDE_CONFIG_DIR"] = os.path.join(D, "claude-config")
     return e
 
@@ -119,7 +117,7 @@ def shown(who):
 
 
 def link_relays(link):
-    """A team link's relay fields: the team's own, and the inviting machine's (0xFF: one of n0's, by region)."""
+    """A team link's relay fields. A 0xFF marker is a compact public relay, which this build rejects."""
     t = re.split(r"#rn1-|#tincan1", link)[1]
     raw, at, fields = base64.urlsafe_b64decode(t + "=" * (-len(t) % 4)), 32, []
     for _ in range(3):  # the team name first
@@ -138,23 +136,23 @@ def link_secret(link):
 
 os.makedirs(os.path.join(D, "work"), exist_ok=True)
 
-# --- team formation, signed in with Reason ---
+# --- team formation ---
 ep = {who: cli(who, "endpoint") for who in H}
 check("endpoint prints this machine's id, before any team", all(re.fullmatch(r"[0-9a-f]{64}", e) for e in ep.values()), ep)
 check("…the same one each time", cli("alex", "endpoint") == ep["alex"], ep)
 out = cli("alex", "init", "vibes", "--as", "whoever", "--proof", proof("u_alex", "alex", ep["alex"]), "--no-setup")
 check("init with a proof: the name is the proof's", "Created team vibes. You are alex on laptop." in out, out)
-check("…and prints the invite line", re.search(r"Invite people with this line:\nJoin the Reason Network: https://reasonmachines.com/network/join/#rn1-\S+", out) is not None, out)
+check("…and prints the invite line", re.search(r"Invite people with this line:\nJoin Open Agent Network: rn1-\S+", out) is not None, out)
 out = cli("alex", "invite")
 link = re.search(r"(https://\S+/join/#rn1-\S+)", out)
 check("invite prints the team link, as an rn1 link", bool(link), out)
-check("…in the invite line", f"Join the Reason Network: {link.group(1) if link else '?'}" in out, out)
+check("…in the invite line", f"Join Open Agent Network: {link.group(1) if link else '?'}" in out, out)
 out, _ = run(env("alice"), "join", link.group(1), "--as", "alice", "--proof", proof("u_alice", "alice", ep["alice"]), "--no-setup", "--json")
 j = as_json(out)
 check("join with a proof and --json gives the team", j.get("team_name") == "vibes" and j.get("person") == "alice" and j.get("machine") == "desktop"
       and j.get("endpoint") == ep["alice"] and re.fullmatch(r"[0-9a-f]{32}", j.get("team_id", "")) is not None, out)
-check("…with the link and invite line", j.get("link", "").startswith("https://reasonmachines.com/network/join/#rn1-")
-      and j.get("invite_line") == f"Join the Reason Network: {j.get('link')}", out)
+check("…with the link and invite line", j.get("link", "").startswith("rn1-")
+      and j.get("invite_line") == f"Join Open Agent Network: {j.get('link')}", out)
 members = {m["person"]: m for m in j.get("members", [])}
 check("…and both people verified", members.get("alex", {}).get("verified") is True and members.get("alice", {}).get("verified") is True, out)
 time.sleep(3)
@@ -162,24 +160,22 @@ out = cli("alice", "team")
 check("joiner sees alex connected, verified", re.search(r"alex \(verified\)\s+laptop\s+(direct|relay)", out) is not None, out)
 out = cli("alex", "team")
 check("founder sees alice connected, verified", re.search(r"alice \(verified\)\s+desktop\s+(direct|relay)", out) is not None, out)
-check("a team without a relay of its own is on Reason's: the link names the one alex is on",
-      link_relays(link.group(1))[0] == "" and re.fullmatch(r"https://relay-\w+\.compute\.reasonmachines\.com/", link_relays(link.group(1))[1])
-      and "relay: Reason's (the default)" in out, out)
+check("the team link does not name a public relay host", "n0.iroh" not in out, out)
 j = as_json(cli("alex", "team", "--json"))
 check("team --json marks people verified, and each machine's proof", [(m["verified"], m["has_proof"]) for m in j.get("members", [])] == [(True, True)] * 2
       and j.get("link", "").startswith("https://") and j.get("team_name") == "vibes" and len(j.get("team_id", "")) == 32, j)
 j = as_json(cli("alex", "link", "--json"))
-check("link --json gives the invite line", j.get("invite_line", "").startswith("Join the Reason Network: https://reasonmachines.com/network/join/#rn1-"), j)
+check("link --json gives the invite line", j.get("invite_line", "").startswith("Join Open Agent Network: rn1-"), j)
 out = cli("alex", "link")
-check("link prints the invite line", "Join the Reason Network: https://reasonmachines.com/network/join/#rn1-" in out, out)
+check("link prints the invite line", "Join Open Agent Network: rn1-" in out, out)
 j = as_json(cli("alex", "who", "--json"))
 check("who --json marks machines verified", all(m.get("verified") for m in j.get("machines", [])) and len(j.get("machines", [])) == 2, j)
 out = cli("alice", "proof", proof("u_alice", "alice", ep["alice"]))
 check("proof refreshes this machine's proof", "alice on desktop is verified, for 89 more days." in out or "for 90 more days." in out, out)
 out = cli("alice", "proof", proof("u_alice", "alicia", ep["alice"]))
 check("…but not one for another name", "this proof is for alicia, but this machine is alice in the team" in out, out)
-# Someone else signed in, or not at all, can't be alex or alice; a proof Reason didn't sign, or for another machine, gets nobody in.
-mal = dict(env("alice"), REASON_NETWORK_HOME=os.path.join(D, "mallory"), REASON_NETWORK_MACHINE="evil")
+# Someone else, or not at all, can't be alex or alice; a proof this build doesn't trust, or for another machine, gets nobody in.
+mal = dict(env("alice"), OAN_HOME=os.path.join(D, "mallory"), OAN_MACHINE="evil")
 mal_ep = run(mal, "endpoint")[0]
 out, both = run(mal, "join", link.group(1), "--proof", proof("u_mallory", "alex", mal_ep), "--no-setup", "--json")
 check("a name verified by another account is taken: name_taken", as_json(out) == {"error": "name_taken"}, both)
@@ -189,12 +185,12 @@ _, out = run(mal, "join", link.group(1), "--proof", proof("u_mallory", "mallory"
 check("a forged proof is refused", "signature doesn't verify" in out and "Joined" not in out, out)
 _, out = run(mal, "join", link.group(1), "--proof", proof("u_alex", "alex", ep["alex"]), "--no-setup")
 check("someone else's proof is refused", "for another machine" in out and "Joined" not in out, out)
-_, out = run(mal, "init", "x", "--proof", proof("u_mallory", "mallory", mal_ep, aud="reason"), "--no-setup")
-check("init refuses a proof for something else", "isn't from Reason Network" in out and "Created" not in out, out)
+_, out = run(mal, "init", "x", "--proof", proof("u_mallory", "mallory", mal_ep, aud="other"), "--no-setup")
+check("init refuses a proof for something else", "isn't from Open Agent Network" in out and "Created" not in out, out)
 out, both = run(mal, "join", link.group(1), "--proof", "garbage", "--no-setup", "--json")
 check("with --json every failure is JSON", as_json(out) == {"error": "this sign-in proof is damaged"}, both)
-# The Reason CLI joins over the daemon's socket (the proof never on a command line): its error replies carry a code.
-sock_path = os.path.join(mal["REASON_NETWORK_HOME"], "network.sock")
+# The installer joins over the daemon's socket (the proof never on a command line): its error replies carry a code.
+sock_path = os.path.join(mal["OAN_HOME"], "network.sock")
 if len(sock_path) < 100:  # longer ones get a hashed name elsewhere (see paths::socket)
     import socket
     with socket.socket(socket.AF_UNIX) as sock:
@@ -214,12 +210,12 @@ check("a sign-in joins only with a link, never a four-word code", "not a four-wo
 run(mal, "stop")
 check("alex's team still has just the two", len(as_json(cli("alex", "team", "--json")).get("members", [])) == 2)
 # alex signed in on a second computer: the same account takes its name there, let in by anyone's machine.
-mini = dict(env("alex"), REASON_NETWORK_HOME=os.path.join(D, "alex-mini"), REASON_NETWORK_MACHINE="mini")
+mini = dict(env("alex"), OAN_HOME=os.path.join(D, "alex-mini"), OAN_MACHINE="mini")
 mini_ep = run(mini, "endpoint")[0]
 alice_link = re.search(r"(https://\S+#rn1-\S+)", cli("alice", "link")).group(1)
 _, out = run(mini, "join", alice_link, "--proof", proof("u_alex", "alex", mini_ep), "--no-setup")
 check("another computer of the same account joins under its verified name (alice's link: alex's machine lets it in)", "Joined team vibes as alex on mini." in out, out)
-check("…and gets the invite line", "Join the Reason Network: https://reasonmachines.com/network/join/#rn1-" in out, out)
+check("…and gets the invite line", "Join Open Agent Network: rn1-" in out, out)
 time.sleep(3)
 out = cli("alex", "team")
 check("…which every machine takes", re.search(r"alex \(verified\)\s+mini", out) is not None, out)
@@ -227,9 +223,9 @@ run(mini, "leave")
 run(mini, "stop")
 out = cli("alice", "join", link.group(1), "--as", "bob", "--no-setup")
 check("joining a second team is refused while yours has others, and says how to switch",
-      "already in team 'vibes' (with alex)" in out and "reason-network leave" in out, out)
+      "already in team 'vibes' (with alex)" in out and "oan leave" in out, out)
 # Installed on its own and started a team by itself first: the team link still just works.
-sam = dict(env("alice"), REASON_NETWORK_HOME=os.path.join(D, "sam"), REASON_NETWORK_MACHINE="mini")
+sam = dict(env("alice"), OAN_HOME=os.path.join(D, "sam"), OAN_MACHINE="mini")
 r = subprocess.run([BIN, "init", "solo", "--as", "sam", "--no-setup"], env=sam, capture_output=True, text=True, timeout=90)
 # (With a link as earlier builds wrote it.)
 old_link = link.group(1).replace("#rn1-", "#tincan1")
@@ -239,23 +235,23 @@ check("…unverified, without a proof", re.search(r"sam\s+mini", r.stdout) is no
 subprocess.run([BIN, "leave"], env=sam, capture_output=True, timeout=60)
 subprocess.run([BIN, "stop"], env=sam, capture_output=True)
 os.makedirs(os.path.join(D, "bob"), exist_ok=True)
-bob = dict(env("alice"), REASON_NETWORK_HOME=os.path.join(D, "bob"), REASON_NETWORK_MACHINE="nuc")
+bob = dict(env("alice"), OAN_HOME=os.path.join(D, "bob"), OAN_MACHINE="nuc")
 out = cli("alex", "invite", "--code")
 code = re.search(r"One-time code for a teammate: ([a-z]+(?:-[a-z]+){3})", out)
 check("invite --code prints a four-word code", bool(code), out)
 r = subprocess.run([BIN, "join", code.group(1).replace("-", " ").upper(), "--as", "bob", "--no-setup"], env=bob,
                    capture_output=True, text=True, timeout=90)
 check("joining with just the code works", "Joined team vibes as bob on nuc." in r.stdout, r.stdout + r.stderr)
-r = subprocess.run([BIN, "join", code.group(1), "--as", "bob2", "--no-setup"], env=dict(bob, REASON_NETWORK_HOME=os.path.join(D, "bob2")),
+r = subprocess.run([BIN, "join", code.group(1), "--as", "bob2", "--no-setup"], env=dict(bob, OAN_HOME=os.path.join(D, "bob2")),
                    capture_output=True, text=True, timeout=90)
 check("a used code doesn't work twice", "Joined" not in r.stdout + r.stderr, r.stdout + r.stderr)
-subprocess.run([BIN, "stop"], env=dict(bob, REASON_NETWORK_HOME=os.path.join(D, "bob2")), capture_output=True)
+subprocess.run([BIN, "stop"], env=dict(bob, OAN_HOME=os.path.join(D, "bob2")), capture_output=True)
 out = subprocess.run([BIN, "link"], env=bob, capture_output=True, text=True, timeout=30).stdout
 check("any member can show the same team link", link.group(1).split("#")[1][:40] in out.replace("\n", ""), out)
 subprocess.run([BIN, "stop"], env=bob, capture_output=True)
 
 # --- removal while online: the removed machine never gets the link that replaces the one it knew ---
-eve = dict(env("alice"), REASON_NETWORK_HOME=os.path.join(D, "eve"), REASON_NETWORK_MACHINE="tab")
+eve = dict(env("alice"), OAN_HOME=os.path.join(D, "eve"), OAN_MACHINE="tab")
 eve_link = re.search(r"(https://\S+#rn1-\S+)", cli("alex", "link")).group(1)
 _, out = run(eve, "join", eve_link, "--as", "eve", "--no-setup")
 check("eve joins", "Joined team vibes as eve on tab." in out, out)
@@ -297,19 +293,19 @@ time.sleep(7)  # Claude's session registers after 3s; presence propagates every 
 out = codex.tool("list_team", {}, meta)
 claude_name = os.path.basename(ROOT).lower() + "-claude"
 check("alice's agent sees alex's session across machines", claude_name in out and "alex (verified) · laptop" in out, out)
-check("list_team gives the invite line", "Invite people with this line: Join the Reason Network: https://reasonmachines.com/network/join/#rn1-" in out, out)
-# (After Codex's first tool call registered it.) Nobody reports a status: Reason Network reads the plan step in progress from Codex's own transcript.
+check("list_team gives the invite line", "Invite people with this line: Join Open Agent Network: rn1-" in out, out)
+# (After Codex's first tool call registered it.) Nobody reports a status: Open Agent Network reads the plan step in progress from Codex's own transcript.
 rollout = os.path.join(D, "rollout.jsonl")
-plan = {"plan": [{"step": "set up fixtures", "status": "completed"}, {"step": "testing cross-machine Reason Network", "status": "in_progress"}]}
+plan = {"plan": [{"step": "set up fixtures", "status": "completed"}, {"step": "testing cross-machine Open Agent Network", "status": "in_progress"}]}
 with open(rollout, "w") as f:
     f.write(json.dumps({"type": "response_item", "payload": {"type": "function_call", "name": "update_plan", "arguments": json.dumps(plan)}}) + "\n")
 hook("alice", "codex", "doing", {"session_id": "11111111-aaaa", "cwd": os.path.join(D, "work"), "transcript_path": rollout})
 time.sleep(3)
 out = cli("alex", "who")
-check("alex sees what alice's codex is doing, read from its plan", "work-codex" in out and "testing cross-machine Reason Network" in out, out)
+check("alex sees what alice's codex is doing, read from its plan", "work-codex" in out and "testing cross-machine Open Agent Network" in out, out)
 
 # --- messages across machines ---
-out = codex.tool("send_message", {"to": f"alex/{claude_name}", "message": "Reason Network e2e (cross-machine push): ignore this."}, meta)
+out = codex.tool("send_message", {"to": f"alex/{claude_name}", "message": "Open Agent Network e2e (cross-machine push): ignore this."}, meta)
 want = "delivered into the session" if IN_CLAUDE else "only sees it when it checks"
 check("cross-machine send reaches the Claude session", want in out, out)
 out = cli("alex", "send", "alice/work-codex", "hello from alex's terminal")
@@ -338,7 +334,7 @@ out = codex.tool("send_message", {"to": "alex/terminal", "message": "codex here:
 check("an agent can reply at once to a terminal that just messaged it", "→ alex/terminal: queued" in out or "→ alex/terminal: delivered" in out, out)
 time.sleep(1)
 out = cli("alex", "listen", "--as", "terminal", "--wait", "5")
-check("…and `reason network listen --as terminal` shows the reply", "replying to your terminal" in out and 'from="alice/work-codex"' in out, out)
+check("…and `oan listen --as terminal` shows the reply", "replying to your terminal" in out and 'from="alice/work-codex"' in out, out)
 cli("alice", "listen", "--as", "fresh", "--wait", "0")
 cli("alice", "send", "alex/terminal", "--from", "alice/fresh", "first words from a new session")
 out = cli("alex", "send", "alice/fresh", "answered at once")
@@ -381,7 +377,7 @@ def inbox(who):
     return sorted(os.listdir(p)) if os.path.isdir(p) else []
 def message_with(out, text):
     """The part of an inbox listing for the message saying `text`: its frame and the file list after it."""
-    return next((part for part in out.split("<reason-message") if text in part.split("</reason-message>")[0]), "")
+    return next((part for part in out.split("<oan-message") if text in part.split("</oan-message>")[0]), "")
 def saved(out, who):
     """The file paths a message lists, if each is in `who`'s inbox folder, readable and not executable."""
     paths = re.findall(r"^- (/.+)$", out, re.M)
@@ -395,7 +391,7 @@ check("a send with files is accepted", "→ alice/work-codex" in out and "refuse
 out = codex.tool("check_inbox", {}, meta)
 paths = saved(out, "alice")
 check("files arrive in the message, listed by where they are saved",
-      "Files they sent with" in out.split("</reason-message>")[-1] and [os.path.basename(p) for p in paths] == ["notes.md", "app.json"], out)
+      "Files they sent with" in out.split("</oan-message>")[-1] and [os.path.basename(p) for p in paths] == ["notes.md", "app.json"], out)
 check("…in folders named by the recipient, not by the sender's message id",
       all(re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", os.path.basename(os.path.dirname(p))) for p in paths)
       and re.search(r'id="([0-9A-Z]{26})"', out).group(1) not in inbox("alice"), out)
@@ -468,7 +464,7 @@ out = codex.tool("check_inbox", {}, meta)
 check("held message is not delivered", "held message" not in out, out)
 check("…and its files aren't saved yet", inbox("alice") == before, inbox("alice"))
 out = cli("alice", "held")
-check("Reason Network held lists it", "held message" in out and "notes.md (saved once approved)" in out, out)
+check("Open Agent Network held lists it", "held message" in out and "notes.md (saved once approved)" in out, out)
 cli("alice", "approve", "--all")
 out = codex.tool("check_inbox", {}, meta)
 check("approved message is delivered", "held message" in out, out)

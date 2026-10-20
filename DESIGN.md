@@ -1,7 +1,7 @@
-# Reason Network design
+# Open Agent Network design
 
-> This is how the engine works inside. **AI agent asked to join the Reason Network?** Follow
-> https://reasonmachines.com/network instead.
+> This is how the engine works inside. **AI agent asked to join the Open Agent Network?** Follow
+> https://github.com/compuficial/open-agent-network instead.
 
 A team directory and message bus for coding agents. Any agent (Claude Code, Codex, Cursor, Gemini CLI,
 opencode, Copilot CLI, Amp, …) on any teammate's machine can see who is working on what, right now, and
@@ -61,24 +61,24 @@ unread mail**, so "tell the api agent X" survives restarts (idea from agentbus).
 
 ```
 ┌─ machine: alex-mbp ───────────────────────────────────────────┐
-│ claude ── reason-network mcp ──┐                                       │
-│ codex  ── reason-network mcp ──┤  unix socket       ┌──────────────┐   │      iroh QUIC (ed25519-authenticated)
-│ cursor ── reason-network mcp ──┼──────────────────▶ │ Reason Network daemon │◀──┼──▶   direct on LAN (mDNS)
-│ hooks: reason-network hook … ──┘  ~/.reason/network/sock     │  SQLite      │   │      hole-punched over internet
-│ you:   reason-network who/send ──────────────────▶  └──────────────┘   │      relay fallback over HTTPS :443
+│ claude ── oan mcp ──┐                                       │
+│ codex  ── oan mcp ──┤  unix socket       ┌──────────────┐   │      iroh QUIC (ed25519-authenticated)
+│ cursor ── oan mcp ──┼──────────────────▶ │ Open Agent Network daemon │◀──┼──▶   direct on LAN (mDNS)
+│ hooks: oan hook … ──┘  ~/.oan/sock     │  SQLite      │   │      hole-punched over internet
+│ you:   oan who/send ──────────────────▶  └──────────────┘   │      relay fallback over HTTPS :443
 └───────────────────────────────────────────────────────────────┘
 ```
 
-One static Rust binary, `reason-network` (fronted by `reason network` where the Reason CLI is installed), with
+One static Rust binary, `oan` (fronted by `oan` where the installer is installed), with
 subcommands:
 
-- `reason-network daemon`: per machine. Owns the iroh endpoint, roster, directory, mailboxes (SQLite). Started on
+- `oan daemon`: per machine. Owns the iroh endpoint, roster, directory, mailboxes (SQLite). Started on
   demand by any other subcommand, or installed as a launchd/systemd user service (on Windows, started at logon
   from the user's Run key; there the local socket is a named pipe).
-- `reason-network mcp`: stdio MCP server spawned by the agent. Thin client of the daemon. **Must handle many
+- `oan mcp`: stdio MCP server spawned by the agent. Thin client of the daemon. **Must handle many
   sessions per process**: Codex, opencode and Cursor share one MCP process across threads/tabs.
-- `reason-network hook <agent>`: hook handler (status, context injection, stop-continuation, wake).
-- `reason-network who | send | listen | status | init | invite | join | setup | doctor`: the CLI. `send` goes out as
+- `oan hook <agent>`: hook handler (status, context injection, stop-continuation, wake).
+- `oan who | send | listen | status | init | invite | join | setup | doctor`: the CLI. `send` goes out as
   the agent session whose shell runs it, `--from <session>`, or from a plain terminal as `<you>/terminal`;
   `listen --as <name>` waits for the next message to `<you>/<name>`.
 
@@ -88,30 +88,13 @@ SDK) both exist and work today. Zig has neither, which is why agent-rpc's MCP sh
 ## Network layer (M1)
 
 **Transport: iroh 1.3.** Each daemon is an iroh `Endpoint` with a persistent secret key
-(`~/.reason/network/machine.key`). Peers are dialed by `EndpointId`; iroh resolves addresses via n0 DNS/pkarr, finds
-LAN peers with `iroh-mdns-address-lookup` (works with no internet), hole-punches, and falls back to a relay
-over HTTPS. Relays only see encrypted QUIC. The default relays are Reason's, one per region, as Reason lists them at
-`https://reasonmachines.com/network/relays.json` (`src/relays.rs`), as n0's public relays are rate-limited and meant
-for development. Each machine makes the one with the lowest latency its home relay; relays don't talk to each other,
-but iroh reaches a peer through the peer's home relay, so machines homed on different ones still find each other. The
-list steers relay traffic (end-to-end encrypted, but a bad list could cut machines off or show who talks to whom), so
-it is taken only signed with the same key as sign-in proofs (its own `typ`, `reason-network-relays`, and `iss`),
-fetched only over HTTPS from that address without following redirects, and rejected whole on any fault (an http
-relay, a duplicate, more than 16, over 64 KiB, expired). The daemon fetches it at start (waiting briefly for it on a
-machine's first network start) and every 6 hours, keeps the last good one in the state folder (`relays.json`, used
-even once expired while no newer comes), and applies a new one at the next network start. Without any, sfo1
-(`DEFAULT_RELAYS` in `src/net.rs`). A team without its own
-relay still looks addresses up on n0's DNS, where each machine publishes its home relay: that is how a machine on
-Reason's relay and one of an older build, on n0's, find each other (iroh dials a peer through whichever relay it is
-on), and what a four-word code needs. Teammates are also dialed through each of the default relays, so machines of this
-build find each other even without that lookup. A team can set its own relay
-(`reason-network relay <url>` or `reason-network init --relay <url>`; the `iroh-relay` binary on any VPS, Let's Encrypt on :443,
-access limited to the roster's endpoint ids). Then its machines never contact n0: they use only that relay
-(teammates are dialed through it) and mDNS on the LAN, and invites come in the long form, since a four-word code
-needs n0's lookup. A machine that was off while the team switched relays can't find it on its own; `reason-network doctor`
-there says to set the same relay with `reason-network relay`.
-That is the "HTTPS and local network, MagicDNS style" requirement with one stack, and a relay as the only server
-(Reason's, or the team's own).
+(`~/.oan/machine.key`). Peers are dialed by `EndpointId` through the team's self-hosted relay
+(`presets::Minimal` plus that one URL). There is no public address lookup and no signed relay-list fetch.
+LAN peers can still be found with mDNS when `lan` is on. Relays only see encrypted QUIC. `oan init` and
+`oan join` refuse to run without a self-hosted relay; `oan relay <url>` checks that this machine can reach it.
+Four-word invite codes are refused. See [docs/RELAY.md](docs/RELAY.md).
+Wire identifiers stay compatible with upstream peers on the same relay: ALPN `tincan/1` and `tincan/join/1`,
+protocol `1`, ticket prefix `rn1-`.
 
 **Roster (membership).** Replicated to every machine, every entry signed by a member machine's key:
 - *admissions*: how each machine got in (the founder's self-signed entry, then each admission signed by an
@@ -131,20 +114,20 @@ that was removed while away is first sent the state that says so; strangers lear
 **Invites.** The main way in is the **team link**: `https://<site>/join/#<ticket>`, where the ticket packs the
 team id, the team link's secret, the inviting machine's relay and LAN address hints, and up to six members' keys.
 The link secret is a reusable invite in the team state (any member can show the link and any online member can
-redeem it), replaced with `reason-network link --new` and whenever someone is removed; removed machines are never sent it.
-It travels as the invite line, `Join the Reason Network: <team link>`, which the joiner pastes to their agent: they
-sign in with Reason, and their computer joins with a sign-in proof (see below). Four-word one-time codes
-(`reason-network invite --code`, ~41 bits) derive a temporary iroh key the inviting machine listens on, for joining
+redeem it), replaced with `oan link --new` and whenever someone is removed; removed machines are never sent it.
+It travels as the invite line, `Join Open Agent Network: <team link>`, which the joiner pastes to their agent: they
+join with a team link, and their computer joins with a sign-in proof (see below). Four-word one-time codes
+(`oan invite --code`, ~41 bits) derive a temporary iroh key the inviting machine listens on, for joining
 without signing in. A code can't show the joiner which team answers it (whoever listens on
 the code's key knows the code, so could make up a team), so a sign-in never joins with one: only with a link, which
 names the team. Links are `rn1-…` (older builds wrote `tincan1…`, with the same payload; both are read). After `init`
-and `join` the CLI prints the invite line, `Join the Reason Network: <team link>`, and agents get it from `list_team`.
+and `join` the CLI prints the invite line, `Join Open Agent Network: <team link>`, and agents get it from `list_team`.
 
-**Sign-in proofs.** Signed in with Reason, a machine carries a proof: a compact JWS from Reason's cloud-access
-issuer (`iss` `https://reasonmachines.com/network`), RS256 only, saying this endpoint id belongs to account `sub`,
-named `name`, issued `iat`, until `exp` (`init`/`join --proof`, `reason-network proof` to refresh). The engine checks
-it against Reason's RSA public keys (2048 bits or more), compiled in and never removed, and never calls Reason; debug
-builds also trust the keys in `REASON_NETWORK_TRUST_KEYS` (an RSA JWKS), for tests, and release builds don't. A proof
+**Sign-in proofs.** With a sign-in proof, a machine carries a proof: a compact JWS from the network's cloud-access
+issuer (`iss` `https://github.com/compuficial/open-agent-network`), RS256 only, saying this endpoint id belongs to account `sub`,
+named `name`, issued `iat`, until `exp` (`init`/`join --proof`, `oan proof` to refresh). The engine checks
+it against the network's RSA public keys (2048 bits or more), compiled in and never removed, and never calls out; debug
+builds also trust the keys in `OAN_TRUST_KEYS` (an RSA JWKS), for tests, and release builds don't. A proof
 longer than 4 KB (one signed with a 4096-bit key is at most about 1.6 KB), or issued more than a day ahead, is refused. Proofs
 travel in the team state's `attestations` (endpoint → JWS), outside the signed entries, so builds without them pass
 the rest on unchanged; each machine checks every proof itself, drops the ones that don't verify, and keeps them only
@@ -152,9 +135,9 @@ for members.
 
 `verified` is per person: a person shows as verified while a machine of theirs has a proof for their name that hasn't
 expired. `has_proof` is per machine. Expiry decides only that mark, never membership: who may hold a name goes by
-Reason's signature alone, so it doesn't change as time passes or differ between machines' clocks. With a proof, the
+the network's signature alone, so it doesn't change as time passes or differ between machines' clocks. With a proof, the
 name is the proof's. A name held with a proof can't be taken by anyone else (`{"error":"name_taken"}` with `--json`,
-for the Reason CLI, which signs people in). Another computer of the same account may take it: the joiner first asks the
+for the installer, which signs people in). Another computer of the same account may take it: the joiner first asks the
 link's machines for one of that person's own, whose word every build takes (a machine that isn't says
 `same_account_needs_owner` and the joiner asks the next); if none of them is online, a machine of this build lets it
 in on its proof; if none can, the join fails with `{"error":"same_account_needs_owner"}`, never `name_taken`. Builds
@@ -199,7 +182,7 @@ also holds mail for offline machines and keeps searchable team history. Same bin
 
 ## Local layer (M0)
 
-**Daemon API**: newline-delimited JSON over `~/.reason/network/network.sock` (mode 0600). Requests carry an `id`; a
+**Daemon API**: newline-delimited JSON over `~/.oan/network.sock` (mode 0600). Requests carry an `id`; a
 session connection also receives pushed `deliver` events for its sessions.
 
 **Session registration**, by priority:
@@ -228,10 +211,10 @@ The hard part. Each session advertises a **delivery tier** so senders know when 
 | Claude Code | push | MCP child posts to the session's own inbox socket (`CLAUDE_CODE_MESSAGING_SOCKET`, `{"type":"user",…}` frame): delivered between tool calls, starts a turn if idle. Fallbacks: `asyncRewake` hook (documented idle wake), channels (`notifications/claude/channel`, needs a dev flag until allowlisted). |
 | Codex | push | `codex queue --thread <id>` / app-server `turn/start` (default daemon mode). Mid-turn: `PostToolUse` `additionalContext`. Stop: `decision:block`. Hooks need one-time approval in `/hooks`. |
 | opencode | push | Plugin (one file for 1.x and 2.x): `client.session.promptAsync` (1.x), `ctx.session.prompt` (2.x, where busy/idle come from `session.execution.*` events). |
-| pi | push | Extension (`~/.pi/agent/extensions/reason-network.ts`): registers the MCP server per session (`deferred`, with `REASON_NETWORK_SESSION`), `sendUserMessage` (`deliverAs: "steer"` mid-run, a new turn when idle), busy/idle from `agent_start`/`agent_settled`, the session name as `doing`. |
-| Reason | push | Its agent runs in Reason's cloud: the daemon lists live sessions (`reason session list --json`, when `reason = true`) and sends with `reason session send`. Replies go through the CLI: `reason-network send <to> --from <its address>`. |
+| pi | push | Extension (`~/.pi/agent/extensions/oan.ts`): registers the MCP server per session (`deferred`, with `OAN_SESSION`), `sendUserMessage` (`deliverAs: "steer"` mid-run, a new turn when idle), busy/idle from `agent_start`/`agent_settled`, the session name as `doing`. |
+| other agents | turn or push | Wired by `oan setup` when the agent is installed on this machine. |
 | Amp | push | Plugin: `thread.appendUserMessage(…, {steer:true})`. |
-| Cursor | turn | `postToolUse` `additional_context`; `stop` `followup_message`. Idle: background `reason-network wait`. |
+| Cursor | turn | `postToolUse` `additional_context`; `stop` `followup_message`. Idle: background `oan wait`. |
 | Gemini CLI | turn | `AfterTool` `additionalContext`; `AfterAgent` block. Idle: experimental background-shell inject. |
 | Copilot CLI | turn | `postToolUse` `additionalContext`; `agentStop` block; `notification` hook. |
 | Grok CLI | turn | `PostToolUse` `additionalContext`; `Stop` (`end_turn`) block. SessionStart and prompt-submit output are dropped; subagents' hooks are ignored. |
@@ -241,7 +224,7 @@ The hard part. Each session advertises a **delivery tier** so senders know when 
 MCP notifications are not a delivery path: no client passes them to the model (checked Oct 2026).
 
 Gotcha: Cursor, Copilot CLI and Devin load **Claude Code's** hooks from `~/.claude/settings.json`, so
-`reason-network hook` must detect which agent is actually calling it.
+`oan hook` must detect which agent is actually calling it.
 
 ## What the agent sees
 
@@ -252,7 +235,7 @@ Three tools, none of which an agent has to call unless it wants to message someo
 - `send_message(to, message, reply_to?, notify?, files?)`: `files` are paths of small text files in the session's own
   folder to carry (see Files above). Returns per-recipient state (`delivered` / `queued` /
   `held`) and tier, e.g. "queued: alice/web-cursor is idle and turn-only, it sees this when alice next
-  prompts it". (`reason-network send --fyi` doesn't wake: read at the next natural pause.) `notify` also pops it up on
+  prompts it". (`oan send --fyi` doesn't wake: read at the next natural pause.) `notify` also pops it up on
   the person's screen, for an approval or decision only they can make: osascript on macOS, notify-send on Linux,
   a PowerShell toast on Windows, at most one per person sending a minute, none for messages over 15 minutes old;
   a machine without a desktop says so. With `notify`, `to` may be your own user: then only the pop-up, on each of
@@ -273,27 +256,27 @@ Three tools, none of which an agent has to call unless it wants to message someo
   shown (the request's id and sender, the approver, the decision, the request, the question, the note, the time),
   signed with this machine's key like the team's own entries. The receiving machine keeps it only if the machine that
   sent it signed it, as its own person, for the session it arrived at; anything else is dropped, and the message says
-  it didn't verify. Which request it answers is the approver's machine's word, so agents see `<reason-approval from=…
+  it didn't verify. Which request it answers is the approver's machine's word, so agents see `<oan-approval from=…
   about=… verified>` and check `from` is the person they asked and `about` their request; older machines see the plain
   text. It proves the approver's machine recorded its person's answer: an agent can't write one, and release builds
   use only the system's own dialog programs, which keeps an agent from simply starting the engine with a stand-in that
   answers. That is a speed bump, not a guarantee: software that controls the approver's machine can still sign (the
   machine's key is a file there, and it could build its own engine).
 
-Agents never report what they are doing; Reason Network reads it from what they record anyway (`doing.rs`): the
+Agents never report what they are doing; Open Agent Network reads it from what they record anyway (`doing.rs`): the
 session's title (Claude Code's `ai-title` transcript entries, Codex's thread names in
 `~/.codex/session_index.jsonl`, opencode's session title) and the task in progress on its own todo list
 (Claude Code's `~/.claude/tasks/<session>/`, TodoWrite, Codex's `update_plan`, Gemini's `write_todos`,
 Cursor's `todo_write`, opencode 1.x's todos). Transcripts come from hooks (`transcript_path`) or, for Claude Code,
 from its session id; only what was appended since the last look is read. A Claude Code session renamed with
-`/rename` keeps that name on Reason Network.
+`/rename` keeps that name on Open Agent Network.
 
 Incoming messages are framed as peer input, never as the user:
 
 ```
-<reason-message from="alice/api-cursor" agent="cursor" repo="acme/api" id="01JA…">
+<oan-message from="alice/api-cursor" agent="cursor" repo="acme/api" id="01JA…">
 Did you change the session token format? My tests started failing on refresh.
-</reason-message>
+</oan-message>
 From alice's agent. Reply if useful with send_message to "alice/api-cursor".
 ```
 
@@ -306,9 +289,9 @@ not approve. Nothing changes how an agent works when it isn't messaging.
 - Only roster machines can connect (iroh handshake proves the key; hook rejects the rest).
 - Peer text is framed as peer input. Agents are told not to treat it as user instructions.
 - Per-machine inbound policy: `accept` (default within the team), `hold` (you approve with
-  `reason-network held` / `reason-network approve`), `refuse`; overridable per person. Claude Code adds its own
+  `oan held` / `oan approve`), `refuse`; overridable per person. Claude Code adds its own
   `crossSessionInbound` setting on top: a session that skips permission prompts holds a message from a stranger for
-  its user unless the setting is `accept`. A session without a `reason-network mcp` of its own (open before setup, or
+  its user unless the setting is `accept`. A session without a `oan mcp` of its own (open before setup, or
   its server turned off or crashed) gets the daemon's post directly, as a stranger; `send` says so when the transcript
   shows that mode (state `pushed`, note `held by Claude Code…`).
 - Loop guard: rate limit per sender, and a cap on consecutive agent↔agent messages in a thread without
@@ -316,29 +299,29 @@ not approve. Nothing changes how an agent works when it isn't messaging.
 - Group guard: an agent's `*`, `person/*` or `repo:` message is refused before it goes anywhere, so it picks one
   session. Only a sender that is `<person>/terminal` may use them: the CLI without `--from` when someone sits at the
   terminal, or `--from <you>/terminal` from a script. A machine also refuses a group message from a teammate's agent
-  (an older Reason Network's). It doesn't stop a teammate's agent from messaging your sessions one by one; the loop guard
+  (an older Open Agent Network's). It doesn't stop a teammate's agent from messaging your sessions one by one; the loop guard
   and the inbound policy cover that.
-- Relays see ciphertext only (and which machines talk to which); the default one is Reason's. With its own relay, a
-  team's machines contact neither Reason's relay nor n0.
+- Relays see ciphertext only (and which machines talk to which); the default one is the network's. With its own relay, a
+  team's machines contact neither the network's relay nor n0.
 
 ## Install UX (M3)
 
 ```sh
-curl -fsSL https://reasonmachines.com/install.sh | bash -s -- network                 # sign in, create or join a network
-curl -fsSL https://reasonmachines.com/install.sh | bash -s -- network join '<link>'   # join with an invite link
+curl -fsSL https://github.com/compuficial/open-agent-network | bash -s -- network                 # sign in, create or join a network
+curl -fsSL https://github.com/compuficial/open-agent-network | bash -s -- network join '<link>'   # join with an invite link
 ```
 
-Or paste `Join the Reason Network: https://reasonmachines.com/network` (or an invite line) to a coding agent. The
-Reason CLI's `reason network` signs the person in in their browser, where they create a network or join one, then runs
+Or paste `Join Open Agent Network: https://github.com/compuficial/open-agent-network` (or an invite line) to a coding agent. The
+installer's `oan` signs the person in in their browser, where they create a network or join one, then runs
 this engine's `init` or `join` with `--proof`, sets up the agents, and prints the invite line. Hosted assistants add
-the MCP server `https://mcp.reasonmachines.com/mcp`. On its own, without signing in (names unverified), the engine
-still installs from this repo's releases and runs `reason-network init <name> --as <you>` or
-`reason-network join '<link>' --as <you>`.
+the MCP server ``. On its own, without signing in (names unverified), the engine
+still installs from this repo's releases and runs `oan init <name> --as <you>` or
+`oan join '<link>' --as <you>`.
 
 `join`/`init` run `setup`, which detects installed agents and wires each one (backing up every file it
 edits): Claude Code plugin or `claude mcp add --scope user` + hooks, `~/.codex/config.toml` + `hooks.json`,
 `~/.cursor/mcp.json` + `hooks.json`, `~/.gemini/settings.json`, opencode plugin + MCP, Copilot
-`mcp-config.json` + hooks, `~/.grok/config.toml` + `hooks/reason-network.json`. Or paste the invite line into any agent.
+`mcp-config.json` + hooks, `~/.grok/config.toml` + `hooks/oan.json`. Or paste the invite line into any agent.
 
 ## Milestones
 
@@ -349,14 +332,14 @@ edits): Claude Code plugin or `claude mcp add --scope user` + hooks, `~/.codex/c
 - **M2, adapters** (done): Codex (`codex queue` + hooks), Cursor, Gemini, Copilot (hooks), opencode (plugin);
   `setup [--remove]`, launchd/systemd service, `doctor`. Amp: MCP only, by hand.
 - **M3, ship** (done): GitHub Actions builds for macOS, Linux and Windows; `install.sh` / `install.ps1` (install and
-  join in one line, or hand over to the Reason CLI), with the release. Standalone installs update themselves; the
-  Reason CLI pins its own. Later: Homebrew.
+  join in one line, or hand over to the installer), with the release. Standalone installs update themselves; the
+  installer pins its own. Later: Homebrew.
 - **M4, team features**: file-overlap warnings ("bob/api-codex is also editing src/auth.rs", from
   `PostToolUse` edit paths), anchor mailbox and history, hold/approve notifications, web dashboard.
 
 ## Defaults (easy to change)
 
-- Names: `reason-network` for the binary and the repo, Reason Network in prose.
+- Names: `oan` for the binary and the repo, Open Agent Network in prose.
 - License: MIT OR Apache-2.0.
 - Inbound policy between teammates: `accept` (per-person `hold`/`refuse` available).
 - Teammates see repo@branch and the last component of the working directory; full paths are opt-in.
@@ -374,30 +357,29 @@ edits): Claude Code plugin or `claude mcp add --scope user` + hooks, `~/.codex/c
 
 ## Config
 
-`~/.reason/network/config.toml`:
+`~/.oan/config.toml`:
 
 | Key | Default | |
 |---|---|---|
 | `person` | `$USER` | your name (set by `init`/`join`) |
 | `share_paths` | `false` | show teammates full working directories |
-| `share_unmanaged` | `false` | show teammates Claude Code sessions that don't have Reason Network loaded |
+| `share_unmanaged` | `false` | show teammates Claude Code sessions that don't have Open Agent Network loaded |
 | `tray` | `true` | macOS: show the menu bar icon while the background service runs |
 | `lan` | `true` | find teammates on the local network (mDNS) |
-| `auto_update` | `true` | install new releases when they come out (checked every few hours) |
-| `reason` | `false` | list your live Reason sessions (set by `reason-network setup`) |
+| `auto_update` | `false` | install new releases when they come out (checked every few hours) |
 | `inbound` | accept | see above |
 
 ## Troubleshooting
 
-- **`reason-network doctor`** checks the daemon, the team connection (direct or relayed, per machine) and every agent.
-- **An agent doesn't have the Reason Network tools:** restart that session; agents load MCP servers at startup.
-- **A teammate shows as offline:** their machine is asleep or Reason Network isn't running there (`reason-network doctor` on
+- **`oan doctor`** checks the daemon, the team connection (direct or relayed, per machine) and every agent.
+- **An agent doesn't have the Open Agent Network tools:** restart that session; agents load MCP servers at startup.
+- **A teammate shows as offline:** their machine is asleep or Open Agent Network isn't running there (`oan doctor` on
   their side). Messages wait in your outbox and go out when they're back. If it was off while the team changed
-  relays, run `reason-network relay` there with the team's relay (`reason-network team` shows it).
-- **macOS asks to let Reason Network find devices on your local network:** allow it for direct LAN connections. If you
-  don't, Reason Network still works over the internet.
-- **Windows asks to let Reason Network through the firewall:** allow it for direct and LAN connections. If you don't,
-  Reason Network still works, through a relay.
-- **Codex sessions don't show up until they use a Reason Network tool:** Codex hasn't been told to trust the hooks yet;
+  relays, run `oan relay` there with the team's relay (`oan team` shows it).
+- **macOS asks to let Open Agent Network find devices on your local network:** allow it for direct LAN connections. If you
+  don't, Open Agent Network still works over the internet.
+- **Windows asks to let Open Agent Network through the firewall:** allow it for direct and LAN connections. If you don't,
+  Open Agent Network still works, through a relay.
+- **Codex sessions don't show up until they use a Open Agent Network tool:** Codex hasn't been told to trust the hooks yet;
   run `/hooks` in Codex.
-- Logs: `~/.reason/network/daemon.log`.
+- Logs: `~/.oan/daemon.log`.

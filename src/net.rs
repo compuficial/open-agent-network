@@ -1,4 +1,5 @@
 //! Machines talking to each other: one iroh QUIC connection per pair of team machines, dialed by public key
+// Modified by compuficial, 2026.
 //! (direct on the LAN or hole-punched over the internet, relayed over HTTPS otherwise). On it, a single stream
 //! of length-prefixed JSON frames carries team state, presence, messages and acks.
 
@@ -36,9 +37,8 @@ const MAX_FRAME: usize = 4 << 20;
 const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 /// Two machines that dial each other at once open their connections within this long of each other.
 const DIALED_TOGETHER: Duration = Duration::from_secs(5);
-/// The relay of a team that doesn't run its own while this machine has no list of Reason's relays (see `relays`).
-/// n0's public ones are rate-limited and meant for testing.
-pub const DEFAULT_RELAYS: &[&str] = &["https://relay-sfo1.compute.reasonmachines.com"];
+/// No built-in relays. A team names its own.
+pub const DEFAULT_RELAYS: &[&str] = &[];
 
 pub fn default_relays() -> Vec<RelayUrl> {
     DEFAULT_RELAYS.iter().map(|u| u.parse().expect("default relays are urls")).collect()
@@ -78,7 +78,7 @@ pub struct JoinRequest {
     pub secret: String,
     pub person: String,
     pub machine: String,
-    /// The joiner's Reason sign-in proof. Builds before proofs ignore it.
+    /// The joiner's sign-in proof. Builds before proofs ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proof: Option<String>,
     /// Let another computer of the account holding the name in only from one of that person's machines (see
@@ -120,7 +120,7 @@ struct Link {
 
 pub struct Net {
     endpoint: Endpoint,
-    /// Where teammates are dialed: the team's own relay (nothing looks them up on n0's DNS then), or the default ones.
+    /// Where teammates are dialed: the team's self-hosted relay. There is no public address lookup.
     relays: Vec<RelayUrl>,
     router: Mutex<Option<Router>>,
     /// Endpoints listening for joins on behalf of invite codes, by their (code-derived) id.
@@ -138,18 +138,9 @@ pub struct Net {
 }
 
 pub async fn bind(key: SecretKey, relay: Option<&str>, lan: bool) -> Result<Endpoint> {
-    let Some(url) = relay else {
-        // The default relays, with n0's address lookup still: that is how a teammate on an older Reason Network (on
-        // n0's relays) and this machine find each other, and what four-word codes need.
-        let relays = crate::relays::current_or_fetch().await;
-        let mut b = Endpoint::builder(presets::N0).secret_key(key).relay_mode(RelayMode::custom(relays));
-        if lan {
-            b = b.address_lookup(MdnsAddressLookup::builder());
-        }
-        return Ok(b.bind().await?);
-    };
-    // The team's own relay and nothing of n0's: none of its relays, no publishing or looking up addresses in its DNS.
-    // Teammates are dialed through the relay instead.
+    // The team's own relay only: no public preset, no address publishing, no address lookup.
+    debug_assert!(default_relays().is_empty());
+    let url = crate::fork::require_relay(relay)?;
     let url: RelayUrl =
         url.parse().map_err(|_| anyhow!("not a relay url: {url} (expected e.g. https://relay.example.com)"))?;
     let mut b = Endpoint::builder(presets::Minimal).secret_key(key.clone()).relay_mode(RelayMode::custom([url]));
@@ -159,8 +150,7 @@ pub async fn bind(key: SecretKey, relay: Option<&str>, lan: bool) -> Result<Endp
     Ok(b.bind().await?)
 }
 
-/// Makes sure this machine reaches `url` as a relay. Nothing falls back to n0's, so a mistyped or unreachable relay
-/// would cut the team off.
+/// Makes sure this machine reaches `url` as a relay. A mistyped or unreachable relay would cut the team off.
 pub async fn check_relay(key: SecretKey, url: &str) -> Result<()> {
     let endpoint = bind(key, Some(url), false).await?;
     let reached = tokio::time::timeout(Duration::from_secs(10), endpoint.online()).await.is_ok();
@@ -171,8 +161,7 @@ pub async fn check_relay(key: SecretKey, url: &str) -> Result<()> {
     Ok(())
 }
 
-/// mDNS, minus the relay a neighbour advertises: a teammate still on n0's relays (it missed a switch, or runs an older
-/// Reason Network) must not draw this machine onto them.
+/// mDNS, minus any relay a neighbour advertises. A neighbour's relay URL must not replace the team's relay.
 #[derive(Debug)]
 struct NoRelays(MdnsAddressLookup);
 
@@ -394,7 +383,7 @@ impl Net {
             )),
             invites: Default::default(),
             endpoint,
-            relays: relay.map_or_else(crate::relays::current, |u| u.parse().into_iter().collect()),
+            relays: relay.and_then(|u| u.parse().ok()).into_iter().collect(),
             daemon: Arc::downgrade(daemon),
             links: Default::default(),
             remote: Mutex::new(remote),
@@ -557,7 +546,7 @@ impl Net {
     }
 
     async fn dial(self: Arc<Self>, id: EndpointId) {
-        // On the default relays, n0's address lookup runs too: a teammate may be on n0's (an older Reason Network).
+        // Dial only through the team's relay. There is no public address lookup.
         let mut addr = EndpointAddr::new(id);
         for url in &self.relays {
             addr = addr.with_relay_url(url.clone());
@@ -831,11 +820,9 @@ mod tests {
     }
 
     #[test]
-    fn the_default_relay_is_reasons_and_none_of_n0s() {
-        let relays = default_relays();
-        assert_eq!(relays.len(), DEFAULT_RELAYS.len());
-        assert_eq!(relays[0].to_string(), "https://relay-sfo1.compute.reasonmachines.com/");
-        assert!(relays.iter().all(|u| u.scheme() == "https" && !u.as_str().contains(".n0.iroh.link")));
+    fn there_is_no_built_in_relay() {
+        assert!(default_relays().is_empty());
+        assert!(crate::fork::require_relay(None).is_err());
     }
 
     #[test]

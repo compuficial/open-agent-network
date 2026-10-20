@@ -1,3 +1,4 @@
+// Modified by compuficial, 2026.
 mod agent;
 mod claude;
 mod client;
@@ -5,6 +6,7 @@ mod config;
 mod daemon;
 mod doing;
 mod files;
+mod fork;
 mod git;
 mod hook;
 mod invite;
@@ -30,39 +32,31 @@ use client::Link;
 use proto::*;
 use std::{io::Read, time::Duration};
 
-/// Reason Network's page; team links point at its join page.
-pub const SITE_URL: &str = "https://reasonmachines.com/network";
-
 /// The name agents know this by: their MCP server, plugin and extension files, hook names.
-pub const AGENT_NAME: &str = "reason-network";
-/// The name this engine used before it was Reason Network: `setup` takes out what this binary wired in under it, and
+pub use fork::AGENT_NAME;
+/// The name this engine used before it was Open Agent Network: `setup` takes out what this binary wired in under it, and
 /// `paths` moves the state it kept under it.
 pub const LEGACY_NAME: &str = "tincan";
 
 /// Where releases are published: a standalone install and its updates come from here.
-pub const REPO: &str = "reason-machines/reason-network";
+pub use fork::REPO;
 
-/// Whether the Reason CLI installed this binary (in `~/.reason/bin`): then it sets up and updates with the CLI, and
-/// people type `reason network`.
+/// This build is never managed by another product's CLI.
 pub fn managed() -> bool {
-    static MANAGED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MANAGED.get_or_init(|| {
-        let real = |p: std::path::PathBuf| p.canonicalize().unwrap_or(p);
-        util::current_exe().is_ok_and(|p| real(p).starts_with(real(paths::user_home().join(".reason").join("bin"))))
-    })
+    false
 }
 
-/// The command people type, for messages (`{CLI}`): `reason network` with the Reason CLI, `reason-network` on its own.
+/// The command people type, for messages (`{CLI}`): `oan` with the installer, `oan` on its own.
 pub struct Command;
 pub const CLI: Command = Command;
 impl std::fmt::Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(if managed() { "reason network" } else { AGENT_NAME })
+        f.write_str(if managed() { "oan" } else { AGENT_NAME })
     }
 }
 
-/// The engine as a command agents can run here: its full path where the Reason CLI manages it (whose `reason network`
-/// doesn't take every engine command and flag), `reason-network` on its own.
+/// The engine as a command agents can run here: its full path where the installer manages it (whose `oan`
+/// doesn't take every engine command and flag), `oan` on its own.
 pub struct Engine;
 pub const ENGINE: Engine = Engine;
 impl std::fmt::Display for Engine {
@@ -74,7 +68,7 @@ impl std::fmt::Display for Engine {
     }
 }
 
-/// The one line that installs this engine on its own (without signing in to Reason) and runs `reason-network <args>`: for
+/// The one line that installs this engine and runs `oan <args>`: for
 /// macOS and Linux, and for Windows.
 pub fn install_lines(args: &str) -> [String; 2] {
     let base = format!("https://github.com/{REPO}/releases/latest/download");
@@ -95,25 +89,25 @@ pub fn installer(dir: &std::path::Path) -> std::process::Command {
         cmd = std::process::Command::new("sh");
         cmd.arg("-c").arg(format!("s=\"$(curl -fsSL {base}/install.sh)\" && printf '%s\\n' \"$s\" | sh"));
     }
-    cmd.env("REASON_NETWORK_BIN_DIR", dir).env("REASON_NETWORK_NO_PROMPT", "1");
+    cmd.env("OAN_BIN_DIR", dir).env("OAN_NO_PROMPT", "1");
     cmd
 }
 
-/// The team link: Reason Network's join page, carrying the `ticket`.
+/// The invite text is the ticket. Parsing still accepts an upstream join URL; nothing is fetched.
 pub fn join_url(ticket: &str) -> String {
-    format!("{SITE_URL}/join/#{ticket}")
+    fork::join_url(ticket)
 }
 
 /// The invite line: what a person pastes to their agent to join the team.
 pub fn invite_line(link: &str) -> String {
-    format!("Join the Reason Network: {link}")
+    fork::invite_line(link)
 }
 
 #[derive(Parser)]
 #[command(
-    name = "reason-network",
+    name = "oan",
     version,
-    about = "Reason Network: your agents, talking to your teammates' agents",
+    about = "Open Agent Network: your agents, talking to your teammates' agents",
     after_help = "Run it on its own to get set up, then to see who's working on what."
 )]
 struct Cli {
@@ -173,7 +167,7 @@ enum Cmd {
         /// Your own iroh relay, from the start (see `relay`)
         #[arg(long)]
         relay: Option<String>,
-        /// This machine's Reason sign-in proof: your name is then the one it gives
+        /// This machine's sign-in proof: your name is then the one it gives
         #[arg(long)]
         proof: Option<String>,
         /// Print the result as JSON
@@ -208,7 +202,7 @@ enum Cmd {
         person: Option<String>,
         #[arg(long)]
         no_setup: bool,
-        /// This machine's Reason sign-in proof: your name is then the one it gives
+        /// This machine's sign-in proof: your name is then the one it gives
         #[arg(long)]
         proof: Option<String>,
         /// Print the result as JSON
@@ -220,7 +214,7 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Attach or refresh this machine's Reason sign-in proof, which verifies your name to teammates
+    /// Attach or refresh this machine's sign-in proof, which verifies your name to teammates
     Proof { jws: String },
     /// Print this machine's endpoint id (what a sign-in proof names)
     Endpoint,
@@ -232,7 +226,7 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
-    /// Use your own iroh relay for the team, so its machines never contact n0 (or `default` for Reason's relays)
+    /// Point the team at a self-hosted iroh relay every member can reach
     Relay { url: String },
     /// List messages waiting for your approval (when `inbound` is `hold`)
     Held,
@@ -248,12 +242,12 @@ enum Cmd {
         #[arg(long)]
         all: bool,
     },
-    /// Wire Reason Network into the agents on this machine and install the background service
+    /// Wire Open Agent Network into the agents on this machine and install the background service
     Setup {
         /// Show what would change without changing anything
         #[arg(long)]
         dry_run: bool,
-        /// Undo: remove Reason Network from every agent and remove the service
+        /// Undo: remove Open Agent Network from every agent and remove the service
         #[arg(long)]
         remove: bool,
         /// Don't install the background service
@@ -262,7 +256,7 @@ enum Cmd {
     },
     /// Check that everything is working
     Doctor,
-    /// Update to the latest release (with the Reason CLI, `reason update` does it)
+    /// Update to the latest release (a standalone install updates with the installer)
     Upgrade,
     /// Called by agents' hooks
     #[command(hide = true)]
@@ -284,7 +278,7 @@ enum Cmd {
     },
     /// Restart the daemon
     Stop,
-    /// Wait for the next message to a named session, print it, and exit (for agents without Reason Network's tools, e.g.
+    /// Wait for the next message to a named session, print it, and exit (for agents without Open Agent Network's tools, e.g.
     /// cloud agents: run it again after replying)
     Listen {
         /// The session's name; reachable as <you>/<name>
@@ -332,7 +326,7 @@ async fn main() -> Result<()> {
             );
             cli(cmd).await.or_else(|e| json_error(json, e))
         }
-        // `reason network` alone: get set up if needed, else show who's around.
+        // `oan` alone: get set up if needed, else show who's around.
         None => {
             let in_team = Link::new(None).call::<TeamInfo>(Request::Team).await.is_ok();
             if !in_team && wizard::interactive() {
@@ -350,7 +344,7 @@ async fn main() -> Result<()> {
 }
 
 /// The agent session this shell belongs to, if it runs inside one.
-/// A session driven from the command line (`reason network listen --as <id>`, or `terminal` for plain-terminal sends): kept
+/// A session driven from the command line (`oan listen --as <id>`, or `terminal` for plain-terminal sends): kept
 /// alive like a hook-known session, so it stays reachable between commands.
 async fn cli_session(link: &std::sync::Arc<Link>, id: &str, event: &str) -> Result<HookReply> {
     let req = Request::Hook(HookCall {
@@ -404,7 +398,7 @@ async fn cli(cmd: Cmd) -> Result<()> {
             }
             let files = files::read(&files, &std::env::current_dir()?)?;
             // Messages come from agent sessions: `--from`'s, this agent's, or from a plain terminal, `<you>/terminal`.
-            // An agent shell Reason Network doesn't know (its tools aren't loaded) counts as a terminal.
+            // An agent shell Open Agent Network doesn't know (its tools aren't loaded) counts as a terminal.
             let send = |from: String| Request::Send {
                 from,
                 to: to.clone(),
@@ -523,6 +517,9 @@ async fn cli(cmd: Cmd) -> Result<()> {
                 println!("\nInvite people with this line:\n{}", invite_line(&l.url));
             }
         }
+        Cmd::Invite { code: true, .. } => {
+            bail!("four-word invite codes are not available; use `{CLI} link` for the team link")
+        }
         Cmd::Invite { me, hours, .. } => {
             let i: InviteInfo = link.call(Request::Invite { me, hours: hours.clamp(1, 24 * 30) }).await?;
             let who = if me { "another machine of yours" } else { "a teammate" };
@@ -530,11 +527,11 @@ async fn cli(cmd: Cmd) -> Result<()> {
             let [unix, windows] = install_lines(&i.code);
             if !me {
                 println!(
-                    "To invite people, the invite line is better: `{CLI} link` gives it (Join the Reason Network: <link>).\n"
+                    "To invite people, the invite line is better: `{CLI} link` gives it (Join Open Agent Network: <link>).\n"
                 );
             }
             println!(
-                "With the code, they run this, which installs the Reason Network engine and joins (their name unverified):\n"
+                "With the code, they run this, which installs the Open Agent Network engine and joins (their name unverified):\n"
             );
             println!("  {unix}\n");
             println!("On Windows, in PowerShell:\n\n  {windows}\n");
@@ -545,7 +542,7 @@ async fn cli(cmd: Cmd) -> Result<()> {
             println!("If this machine will be offline, use the long form instead: {AGENT_NAME} join {}", i.ticket);
             if me {
                 println!(
-                    "\nFor a cloud agent of yours (Grok Bot, Dots, Muse, …), send it: join my Reason Network team as {}: {}",
+                    "\nFor a cloud agent of yours (Grok Bot, Dots, Muse, …), send it: join my Open Agent Network team as {}: {}",
                     default_person(None),
                     join_url(&i.ticket)
                 );
@@ -583,8 +580,10 @@ async fn cli(cmd: Cmd) -> Result<()> {
             wait_exit(daemon_pid()).await;
         }
         Cmd::Relay { url } => {
-            let url = (url != "default").then_some(url);
-            println!("{}", link.call::<String>(Request::SetRelay { url }).await?);
+            if url.eq_ignore_ascii_case("default") {
+                bail!("there is no default relay; pass your self-hosted relay url");
+            }
+            println!("{}", link.call::<String>(Request::SetRelay { url: Some(url) }).await?);
             wait_exit(daemon_pid()).await;
         }
         Cmd::Held => {
@@ -610,9 +609,6 @@ async fn cli(cmd: Cmd) -> Result<()> {
         Cmd::Setup { dry_run, remove, no_service } => setup::run(dry_run, remove, no_service).await?,
         Cmd::Doctor => setup::doctor().await?,
         Cmd::Upgrade => {
-            if managed() {
-                bail!("the network engine updates with the reason CLI: update reason, then run `{CLI} setup`");
-            }
             let dir = util::current_exe()?.parent().map(|d| d.to_path_buf()).unwrap_or_default();
             let exe = dir.join(format!("{AGENT_NAME}{}", std::env::consts::EXE_SUFFIX));
             let waiting = migrate::waiting(&exe);
@@ -637,7 +633,7 @@ async fn cli(cmd: Cmd) -> Result<()> {
     Ok(())
 }
 
-/// The team as `--json` gives it, for the Reason CLI: `set_up_for` names the agents set up, when setup ran.
+/// The team as `--json` gives it, for the installer: `set_up_for` names the agents set up, when setup ran.
 async fn team_json(link: &std::sync::Arc<Link>, set_up_for: Option<Vec<&str>>) -> Result<serde_json::Value> {
     let t: TeamInfo = link.call(Request::Team).await?;
     let l: LinkInfo = link.call(Request::Link { new: false }).await?;
@@ -648,7 +644,7 @@ fn team_value(t: &TeamInfo, l: &LinkInfo, set_up_for: Option<Vec<&str>>) -> Resu
     // A daemon from before team ids were in its reply (it was running when this binary was updated).
     if t.id.is_empty() {
         bail!(
-            "the Reason Network daemon running is older than this command: restart the Reason Network daemon (`{CLI} stop`)"
+            "the Open Agent Network daemon running is older than this command: restart the Open Agent Network daemon (`{CLI} stop`)"
         );
     }
     let endpoint = t.machines.iter().find(|m| m.is_me).map(|m| m.endpoint.clone()).unwrap_or_default();
@@ -681,7 +677,7 @@ fn json_error<T>(json: bool, e: anyhow::Error) -> Result<T> {
 }
 
 /// `{"error":"same_account_needs_owner"}` when one of the person's own computers should let this one in,
-/// `{"error":"name_taken"}` when the name is someone else's in the team (the Reason CLI then asks for another), else the
+/// `{"error":"name_taken"}` when the name is someone else's in the team (the installer then asks for another), else the
 /// message.
 fn json_failure(e: &anyhow::Error) -> serde_json::Value {
     let msg = format!("{e:#}");
@@ -761,14 +757,14 @@ mod tests {
             features: vec![],
         };
         let l = LinkInfo { team: "vibes".into(), url: join_url("rn1-AAAA"), ticket: "rn1-AAAA".into() };
-        assert!(team_value(&t, &l, None).unwrap_err().to_string().contains("restart the Reason Network daemon"));
+        assert!(team_value(&t, &l, None).unwrap_err().to_string().contains("restart the Open Agent Network daemon"));
         t.id = "00112233445566778899aabbccddeeff".into();
         let v = team_value(&t, &l, Some(vec!["Claude Code"])).unwrap();
         assert_eq!(
             (v["team_id"].as_str(), v["team_name"].as_str()),
             (Some("00112233445566778899aabbccddeeff"), Some("vibes"))
         );
-        assert_eq!(v["invite_line"], "Join the Reason Network: https://reasonmachines.com/network/join/#rn1-AAAA");
+        assert_eq!(v["invite_line"], "Join Open Agent Network: rn1-AAAA");
         assert_eq!(
             (v["members"][0]["verified"].as_bool(), v["members"][0]["has_proof"].as_bool()),
             (Some(true), Some(true))

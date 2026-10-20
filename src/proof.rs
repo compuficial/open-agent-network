@@ -1,7 +1,6 @@
-//! Reason sign-in proofs: a statement signed by Reason that a machine's key (its endpoint id) belongs to a Reason
-//! account, and the name that account goes by. A compact JWS (RS256: RSASSA-PKCS1-v1_5 with SHA-256, from Reason's
-//! cloud-access issuer), checked here against Reason's public keys, which are compiled in: verifying one never calls
-//! Reason. Every machine checks every proof it is shown itself.
+//! Sign-in proofs: a compact JWS (RS256) that a machine's key belongs to an account, and the name that account
+//! goes by. This build trusts no built-in issuer. Debug builds and tests may add keys with `OAN_TRUST_KEYS`.
+//! Modified by compuficial, 2026.
 
 use anyhow::{Result, anyhow, bail};
 use data_encoding::BASE64URL_NOPAD;
@@ -9,10 +8,10 @@ use iroh::EndpointId;
 use ring::signature::{RSA_PKCS1_2048_8192_SHA256, RsaPublicKeyComponents};
 use serde::{Deserialize, Serialize};
 
-const ISSUER: &str = "https://reasonmachines.com/network";
-const AUDIENCE: &str = "reason-network";
-const TYPE: &str = "reason-network-proof";
-/// Refused before decoding. A proof Reason signs with a 4096-bit key is at most about 1.6 KB: the signature is 512
+const ISSUER: &str = "https://github.com/compuficial/open-agent-network";
+const AUDIENCE: &str = "oan";
+const TYPE: &str = "oan-proof";
+/// Refused before decoding. A proof signed with a 4096-bit key is at most about 1.6 KB: the signature is 512
 /// bytes (683 in base64url), the header with a 64-character key id about 130, and the claims (a 40-character name, an
 /// email of at most 254, the 64-digit endpoint) at most about 790. Even an 8192-bit key, the most `ring` takes, stays
 /// under 2.3 KB.
@@ -22,28 +21,18 @@ const MAX_SKEW_SECS: i64 = 86_400;
 /// The smallest RSA key trusted, in bits.
 const MIN_BITS: usize = 2048;
 
-/// Reason's proof-signing public keys: key id, then the RSA modulus `n` and exponent `e` in base64url (as in a JWK). In
-/// debug builds `REASON_NETWORK_TRUST_KEYS` (a JWKS) adds keys, for tests.
+/// Proof-signing public keys: key id, then the RSA modulus `n` and exponent `e` in base64url (as in a JWK).
+/// Debug builds and tests may add keys with `OAN_TRUST_KEYS` (a JWKS). This build ships none.
 ///
 /// Never remove a key, even a retired one: who holds a name in a team rests on proofs' signatures (expired proofs
 /// included), so a build without a key that signed some would drop machines that every other build keeps. Add the
 /// new key next to it instead.
-///
-/// The cloud-access issuer's KMS key (`https://oidc.reasonmachines.com`, which signs proofs as `iss`
-/// `https://reasonmachines.com/network`), from https://oidc.reasonmachines.com/.well-known/jwks.json on 2026-10-20.
-/// Only that one: proofs come only from KMS (the issuer refuses rather than falling back to its env key,
-/// `reason-oidc-prod-2026-10-07`, which isn't trusted here). `the_production_keys_are_pinned` pins it to a hash of its
-/// modulus.
-const KEYS: &[(&str, &str, &str)] = &[(
-    "reason-oidc-kms-2026-10",
-    "s5x90QSBmHGl4adzvrjLvQ1ZRiwkDZGJ3pZs7CzPCxjKOBjoPoV6INAi4b8c3F4fMHH1T2BCXH9jX4wQjOCCzZBmB-E9Ch395WiqbLhyY2pH9V-ksbL9DGibS8xCoTT7EySB3FECzd_mHq-kQBCGxKnmBU0uETiPJLV276MzoBFsA8-s0PhsKqiQnUD3AKxHdDX-sWyI145QZasjZIT30Z8ixdRfrcUrLBMtWDhIqsOSP58i3_-3U-2gz_yG-7usgpyTcxCEU1IQGQtKBcJEVwd5QrbGgGE0w_uLxm2anfpT_eCZqOS_TWGYivVZ7TuqnxZgtON6kQgMNctSwprMDQ",
-    "AQAB",
-)];
+const KEYS: &[(&str, &str, &str)] = &[];
 
 /// What a proof says.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Proof {
-    /// The Reason account.
+    /// The account.
     pub sub: String,
     /// The account's name in teams: 1 to 40 of `a-z`, `0-9` and `-`.
     pub name: String,
@@ -99,7 +88,7 @@ fn key(n: &str, e: &str) -> Option<Key> {
 }
 
 /// The keys a proof may be signed with: the compiled-in ones and, in debug builds, those in
-/// `REASON_NETWORK_TRUST_KEYS` (release builds trust only the compiled-in keys), and in tests a test key.
+/// `OAN_TRUST_KEYS` (release builds trust only the compiled-in keys), and in tests a test key.
 fn trusted() -> &'static [(String, Key)] {
     static KEYS_: std::sync::OnceLock<Vec<(String, Key)>> = std::sync::OnceLock::new();
     KEYS_.get_or_init(|| {
@@ -107,7 +96,7 @@ fn trusted() -> &'static [(String, Key)] {
         let mut out: Vec<(String, Key)> =
             KEYS.iter().filter_map(|(kid, n, e)| Some((kid.to_string(), key(n, e)?))).collect();
         #[cfg(any(test, debug_assertions))]
-        if let Some(jwks) = std::env::var_os("REASON_NETWORK_TRUST_KEYS")
+        if let Some(jwks) = std::env::var_os("OAN_TRUST_KEYS")
             && let Ok(jwks) = serde_json::from_str::<Jwks>(&jwks.to_string_lossy())
         {
             out.extend(
@@ -120,7 +109,7 @@ fn trusted() -> &'static [(String, Key)] {
     })
 }
 
-/// Checks `jws` for the machine `endpoint`: Reason's signature, issuer, audience, expiry, and that it names this
+/// Checks `jws` for the machine `endpoint`: the network's signature, issuer, audience, expiry, and that it names this
 /// machine.
 pub fn verify(jws: &str, endpoint: &EndpointId) -> Result<Proof> {
     verify_with(jws, endpoint, crate::util::now_ms() / 1000, trusted(), true)
@@ -136,7 +125,7 @@ fn verify_with(jws: &str, endpoint: &EndpointId, now: i64, keys: &[(String, Key)
     let claims: Claims = serde_json::from_slice(&signed_claims(jws, TYPE, "sign-in proof", MAX_LEN, keys)?)
         .map_err(|_| anyhow!("this sign-in proof is damaged"))?;
     if claims.iss != ISSUER || claims.aud != AUDIENCE {
-        bail!("this sign-in proof isn't from Reason Network");
+        bail!("this sign-in proof isn't trusted");
     }
     let p = claims.proof;
     if expiry && p.exp <= now {
@@ -157,8 +146,9 @@ fn verify_with(jws: &str, endpoint: &EndpointId, now: i64, keys: &[(String, Key)
     Ok(p)
 }
 
-/// The claims of `jws`, a compact JWS of type `typ` (a `what`, in errors) that one of Reason's keys signed, unparsed.
+/// The claims of `jws`, a compact JWS of type `typ` (a `what`, in errors) that one of the network's keys signed, unparsed.
 /// What else they must say is the caller's to check.
+#[allow(dead_code)]
 pub fn verify_signed(jws: &str, typ: &str, what: &str, max_len: usize) -> Result<Vec<u8>> {
     signed_claims(jws, typ, what, max_len, trusted())
 }
@@ -176,10 +166,10 @@ fn signed_claims(jws: &str, typ: &str, what: &str, max_len: usize, keys: &[(Stri
     let header: Header = serde_json::from_slice(&decode(h)?).map_err(|_| bad())?;
     // RS256 only: never `none`, nor HS256 with the public key taken for a shared secret.
     if header.alg != "RS256" || header.typ != typ {
-        bail!("not a Reason Network {what}");
+        bail!("not a trusted {what}");
     }
     let Some((_, key)) = keys.iter().find(|(kid, _)| *kid == header.kid) else {
-        bail!("this {what} is signed with a key this version doesn't know (update Reason Network)");
+        bail!("this {what} is signed with a key this version doesn't know (update Open Agent Network)");
     };
     if key.verify(&RSA_PKCS1_2048_8192_SHA256, format!("{h}.{c}").as_bytes(), &decode(s)?).is_err() {
         bail!("this {what}'s signature doesn't verify");
@@ -202,7 +192,7 @@ pub(crate) mod tests {
         cell.get_or_init(|| RsaKeyPair::from_pkcs8(der).expect("a test key"))
     }
 
-    /// The key test builds trust (see `trusted`), standing in for Reason's: a 2048-bit RSA key made for these tests.
+    /// The key test builds trust (see `trusted`), standing in for the network's: a 2048-bit RSA key made for these tests.
     pub fn signer() -> &'static RsaKeyPair {
         static K: OnceLock<RsaKeyPair> = OnceLock::new();
         pkcs8(&K, include_bytes!("testdata/proof-signer.pk8"))
@@ -278,10 +268,9 @@ pub(crate) mod tests {
             good.split('.').nth(2).unwrap()
         );
         assert!(err(&mixed).contains("signature doesn't verify"));
-        assert!(err(&with(&|c| c["aud"] = json!("reason"))).contains("isn't from Reason Network"));
-        assert!(err(&with(&|c| c["iss"] = json!("https://evil.example"))).contains("isn't from Reason Network"));
-        // Reason's own issuer, but not the network's.
-        assert!(err(&with(&|c| c["iss"] = json!("https://reasonmachines.com"))).contains("isn't from Reason Network"));
+        assert!(err(&with(&|c| c["aud"] = json!("nope"))).contains("isn't trusted"));
+        assert!(err(&with(&|c| c["iss"] = json!("https://evil.example"))).contains("isn't trusted"));
+        assert!(err(&with(&|c| c["aud"] = json!("nope"))).contains("isn't trusted"));
         assert!(err(&with(&|c| c["exp"] = json!(crate::util::now_ms() / 1000 - 1))).contains("expired"));
         assert!(err(&proof("user_1", "alex", &SecretKey::generate().public())).contains("for another machine"));
         for name in ["", "Alex", "alex smith", &"a".repeat(41)] {
@@ -291,7 +280,7 @@ pub(crate) mod tests {
             sign_with(signer(), json!({"alg": "RS256", "kid": "other", "typ": TYPE}), claims("user_1", "alex", &me));
         assert!(err(&unknown).contains("doesn't know"));
         let alg = sign_with(signer(), json!({"alg": "none", "kid": KID, "typ": TYPE}), claims("user_1", "alex", &me));
-        assert!(err(&alg).contains("not a Reason Network sign-in proof"));
+        assert!(err(&alg).contains("not a trusted sign-in proof"));
         for damaged in ["", "a.b", "a.b.c.d", &good[..good.len() - 4]] {
             assert!(verify(damaged, &me).is_err(), "{damaged:?}");
         }
@@ -307,7 +296,10 @@ pub(crate) mod tests {
         assert!(verify_with(&jws, &me, now, &keys, true).is_ok());
         let later = now + 91 * 86_400;
         assert!(verify_with(&jws, &me, later, &keys, true).is_err(), "expired by then");
-        assert!(verify_with(&jws, &me, later, &keys, false).is_ok(), "but still Reason's word, for who holds a name");
+        assert!(
+            verify_with(&jws, &me, later, &keys, false).is_ok(),
+            "but still the network's word, for who holds a name"
+        );
     }
 
     #[test]
@@ -329,20 +321,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_production_keys_are_pinned() {
-        // SHA-256 of the modulus, as Reason's JWKS gave it on 2026-10-20: an accidental edit to `KEYS` fails here.
-        let pins = [("reason-oidc-kms-2026-10", "c8a5d1e79ecc6c6056a7a11eac0b870a664f4b4ecb27392e7db4544c23e039c4")];
-        assert_eq!(KEYS.len(), pins.len());
-        for ((kid, n, e), (pinned_kid, pinned)) in KEYS.iter().zip(pins) {
-            assert_eq!(*kid, pinned_kid);
-            let k = key(n, e).expect("an RSA key of at least 2048 bits");
-            let hash = data_encoding::HEXLOWER.encode(ring::digest::digest(&ring::digest::SHA256, &k.n).as_ref());
-            assert_eq!(hash, pinned, "{kid}");
-            assert_eq!(k.e, [1, 0, 1], "{kid}");
-        }
-        // It's trusted (next to the test key); the issuer's env key isn't.
-        assert!(trusted().iter().any(|(k, _)| k == "reason-oidc-kms-2026-10"));
-        assert!(!trusted().iter().any(|(k, _)| k == "reason-oidc-prod-2026-10-07"));
+    fn no_issuer_key_is_built_in() {
+        assert!(KEYS.is_empty());
+        assert!(trusted().iter().all(|(k, _)| k == KID));
     }
 
     #[test]
@@ -350,7 +331,7 @@ pub(crate) mod tests {
         let me = SecretKey::generate().public();
         let c = claims("user_1", "alex", &me);
         let enc = |v: &serde_json::Value| BASE64URL_NOPAD.encode(&serde_json::to_vec(v).unwrap());
-        // HS256 keyed with Reason's public key (anyone has it), in the forms it gets published.
+        // HS256 keyed with the network's public key (anyone has it), in the forms it gets published.
         let p = public(signer());
         let jwk =
             json!({"kty": "RSA", "kid": KID, "n": BASE64URL_NOPAD.encode(&p.n), "e": BASE64URL_NOPAD.encode(&p.e)});
@@ -358,12 +339,12 @@ pub(crate) mod tests {
             let input = format!("{}.{}", enc(&json!({"alg": "HS256", "kid": KID, "typ": TYPE})), enc(&c));
             let tag = ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &secret), input.as_bytes());
             let jws = format!("{input}.{}", BASE64URL_NOPAD.encode(tag.as_ref()));
-            assert!(verify(&jws, &me).unwrap_err().to_string().contains("not a Reason Network sign-in proof"));
+            assert!(verify(&jws, &me).unwrap_err().to_string().contains("not a trusted sign-in proof"));
         }
         // Unsigned.
         for sig in ["", "AAAA"] {
             let jws = format!("{}.{}.{sig}", enc(&json!({"alg": "none", "kid": KID, "typ": TYPE})), enc(&c));
-            assert!(verify(&jws, &me).unwrap_err().to_string().contains("not a Reason Network sign-in proof"));
+            assert!(verify(&jws, &me).unwrap_err().to_string().contains("not a trusted sign-in proof"));
         }
         // Another RSA scheme's name, over a good RS256 signature.
         let good = proof("user_1", "alex", &me);
@@ -405,7 +386,7 @@ pub(crate) mod tests {
     #[test]
     fn refuses_a_huge_proof_before_decoding_it() {
         let me = SecretKey::generate().public();
-        let header = BASE64URL_NOPAD.encode(br#"{"alg":"RS256","kid":"test-1","typ":"reason-network-proof"}"#);
+        let header = BASE64URL_NOPAD.encode(br#"{"alg":"RS256","kid":"test-1","typ":"oan-proof"}"#);
         for big in [
             format!("{}.A.{}", "A".repeat(4 << 20), "A".repeat(342)),
             format!("{header}.{}.{}", "A".repeat(4 << 20), "A".repeat(342)),

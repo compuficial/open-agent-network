@@ -1,18 +1,15 @@
-"""Reason's relay list: two machines homed on different regional relays still join and talk, and a team's own relay
-still wins over the list. Each machine gets its own signed list from a local server (REASON_NETWORK_RELAYS_URL, which
-debug builds honor), so alex knows only sfo1 and bea only fra1.
+"""Older relay-list script. This build does not fetch a relay list and will not run it.
 
-    cargo build && env -u CLAUDE_CODE_MESSAGING_SOCKET python3 tests/e2e/regional_relays.py
-
-Needs internet (Reason's live relays, n0's address lookup).
+The local pair check is `cargo test --test relay_pair`.
 """
+raise SystemExit("this build does not fetch a relay list; run cargo test --test relay_pair")
 import base64, os, re, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from proofs import RELAY, TRUST, proof, serve_relay_lists
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-BIN = os.environ.get("REASON_NETWORK_TEST_BIN", os.path.join(ROOT, "target", "debug", "reason-network"))
-D = tempfile.mkdtemp(prefix="reason-network-relays-")
+BIN = os.environ.get("OAN_TEST_BIN", os.path.join(ROOT, "target", "debug", "oan"))
+D = tempfile.mkdtemp(prefix="oan-relays-")
 FAKE_BIN = os.path.join(D, "bin")
 UNEXPECTED = os.path.join(D, "unexpected.log")
 # Who knows which relays; carl's team runs its own (sin1), which must win over his list (fra1).
@@ -29,9 +26,9 @@ def check(name, ok, detail=""):
 def env(who):
     e = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
     e.update(HOME=os.path.join(D, "home"), PATH=FAKE_BIN + os.pathsep + os.environ["PATH"], CLAUDE_CONFIG_DIR=os.path.join(D, "claude"),
-             REASON_NETWORK_HOME=os.path.join(D, who), REASON_NETWORK_MACHINE=WHO[who][0], REASON_NETWORK_NO_MDNS="1",
-             REASON_NETWORK_NO_SERVICE="1", REASON_NETWORK_NO_UPDATE="1", REASON_NETWORK_NO_TRAY="1",
-             REASON_NETWORK_TRUST_KEYS=TRUST, REASON_NETWORK_RELAYS_URL=f"{LISTS}/{who}.json")
+             OAN_HOME=os.path.join(D, who), OAN_MACHINE=WHO[who][0], OAN_NO_MDNS="1",
+             OAN_NO_SERVICE="1", OAN_NO_UPDATE="1", OAN_NO_TRAY="1",
+             OAN_TRUST_KEYS=TRUST, OAN_RELAYS_URL=f"{LISTS}/{who}.json")
     return e
 
 

@@ -1,6 +1,6 @@
-// reason network for pi: written by `reason network setup`, removed by `reason uninstall`.
-// Gives each session reason network's tools (deferred: kept out of the model's context until it looks for them), tells
-// reason network whether the session is busy and what it is called, and delivers teammates' messages into it.
+// oan for pi: written by `oan setup`, removed by `oan setup --remove`.
+// Gives each session oan's tools (deferred: kept out of the model's context until it looks for them), tells
+// oan whether the session is busy and what it is called, and delivers teammates' messages into it.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { execFile } from "node:child_process"
 
@@ -34,10 +34,10 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     id = ctx.sessionManager.getSessionId()
     cwd = ctx.cwd
-    pi.registerMcpServer("reason-network", {
+    pi.registerMcpServer("oan", {
       command: ENGINE,
       args: ["mcp"],
-      env: { REASON_NETWORK_AGENT: "pi", REASON_NETWORK_SESSION: id },
+      env: { OAN_AGENT: "pi", OAN_SESSION: id },
       exposure: "deferred",
       description: "Message teammates' coding agents and see what each of their sessions is working on",
     })

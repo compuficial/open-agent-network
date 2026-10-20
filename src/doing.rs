@@ -1,4 +1,5 @@
 //! What a session is doing, read from what its agent records anyway, so agents never have to report it: the
+// Modified by compuficial, 2026.
 //! session's title (Claude Code's `ai-title`, Codex's thread name) and the task in progress on its own todo list
 //! (Claude Code's tasks or TodoWrite, Codex's update_plan, Gemini's write_todos, Cursor's todo_write).
 
@@ -246,7 +247,7 @@ mod tests {
 
     #[test]
     fn reads_appended_lines_and_rewritten_documents() {
-        let dir = std::env::temp_dir().join(format!("reason-network-doing-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oan-doing-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("t.jsonl");
         std::fs::write(&p, "{\"type\":\"ai-title\",\"aiTitle\":\"First\"}\n{\"partial\":").unwrap();

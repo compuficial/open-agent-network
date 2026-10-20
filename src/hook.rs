@@ -1,5 +1,6 @@
-//! `reason-network hook <agent> <event>`: run by an agent's hook system. Tells the daemon the session is alive (and busy
-//! or idle), and prints whatever makes the agent show incoming mail. It never fails loudly: a broken Reason Network must
+//! `oan hook <agent> <event>`: run by an agent's hook system. Tells the daemon the session is alive (and busy
+// Modified by compuficial, 2026.
+//! or idle), and prints whatever makes the agent show incoming mail. It never fails loudly: a broken Open Agent Network must
 //! not break the agent.
 
 use crate::{agent, client::Link, proto::*};
@@ -93,10 +94,10 @@ async fn handle(
     let ids = reply.ids;
     let text = match (reply.text, ev, reply.address) {
         (Some(t), ..) => t,
-        // Say who it is on Reason Network once, at session start.
+        // Say who it is on Open Agent Network once, at session start.
         (None, "start", Some(addr)) => {
             format!(
-                "Reason Network: you are {addr}. Teammates' agents can message you; list_team and send_message reach them."
+                "Open Agent Network: you are {addr}. Teammates' agents can message you; list_team and send_message reach them."
             )
         }
         _ => return None,

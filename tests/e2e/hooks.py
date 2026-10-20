@@ -5,15 +5,15 @@
 import json, os, socket, subprocess, tempfile, threading, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-BIN = os.path.join(ROOT, "target", "debug", "reason-network")
-D = tempfile.mkdtemp(prefix="reason-network-hooks-")
+BIN = os.path.join(ROOT, "target", "debug", "oan")
+D = tempfile.mkdtemp(prefix="oan-hooks-")
 env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
-env.update(REASON_NETWORK_HOME=os.path.join(D, "home"), REASON_NETWORK_NO_MDNS="1", REASON_NETWORK_NO_SERVICE="1", REASON_NETWORK_MACHINE="box")
-# A Claude Code setup of our own (never this machine's real sessions, which Reason Network could deliver into).
+env.update(OAN_HOME=os.path.join(D, "home"), OAN_NO_MDNS="1", OAN_NO_SERVICE="1", OAN_MACHINE="box")
+# A Claude Code setup of our own (never this machine's real sessions, which Open Agent Network could deliver into).
 CLAUDE = os.path.join(D, "claude")
 os.makedirs(os.path.join(CLAUDE, "sessions"))
 with open(os.path.join(CLAUDE, ".claude.json"), "w") as f:
-    json.dump({"mcpServers": {"reason-network": {"type": "stdio", "command": BIN, "args": ["mcp"]}}}, f)
+    json.dump({"mcpServers": {"oan": {"type": "stdio", "command": BIN, "args": ["mcp"]}}}, f)
 env["CLAUDE_CONFIG_DIR"] = CLAUDE
 results = []
 
@@ -70,7 +70,7 @@ check("…and goes away once it's done", "↳" not in out, out)
 # Gemini
 gem = {"session_id": "g-1", "cwd": D, "hook_event_name": "SessionStart"}
 hook("gemini", "session-start", gem)
-# Named after its directory, normalised by Reason Network: read it back rather than guess.
+# Named after its directory, normalised by Open Agent Network: read it back rather than guess.
 gem_name = next(w for w in run("who").split() if w.endswith("-gemini"))
 run("send", gem_name, "gemini: run the tests")
 out = hook("gemini", "stop", gem)
@@ -92,7 +92,7 @@ out = run("who", "oc-proj")
 check("opencode status registers a busy session", "oc-proj-opencode" in out and "busy" in out, out)
 run("send", "oc-proj-opencode", "opencode: ping")
 out = run("hook", "opencode", "poll", "--session", "o-1", cwd=oc)
-check("opencode poll prints the framed message as plain text", out.startswith("<reason-message") and "opencode: ping" in out, out)
+check("opencode poll prints the framed message as plain text", out.startswith("<oan-message") and "opencode: ping" in out, out)
 out = run("hook", "opencode", "poll", "--session", "o-1", cwd=oc)
 check("…and nothing the next time", out == "", out)
 run("hook", "opencode", "doing", "--session", "o-1", "--doing", "Flaky login test · Bisecting the failure", cwd=oc)
@@ -109,7 +109,7 @@ check("pi's extension registers the session, named for what it's doing", "pi-pro
 out = run("send", "pi-proj-pi", "pi: stop and look at this")
 check("the sender hears pi gets it within seconds", "within seconds" in out, out)
 out = run("hook", "pi", "post-tool-use", "--session", "pi-1", cwd=pi_dir)
-check("mid-run, pi gets it as plain text to steer in", out.startswith("<reason-message") and "pi: stop and look at this" in out, out)
+check("mid-run, pi gets it as plain text to steer in", out.startswith("<oan-message") and "pi: stop and look at this" in out, out)
 
 # Session end removes hook-only sessions.
 hook("gemini", "session-end", gem)
@@ -128,68 +128,24 @@ check("an unknown name is an error", "no session called 'nobody-here'" in out, o
 bot = subprocess.Popen([BIN, "listen", "--as", "bot", "--wait", "20"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 time.sleep(2)
 out = run("send", "alex/bot", "bot: summarise the open PRs")
-check("a terminal send reaches a waiting `reason network listen` session", "waiting for messages" in out, out)
+check("a terminal send reaches a waiting `oan listen` session", "waiting for messages" in out, out)
 heard = bot.communicate(timeout=30)[0]
 check("listen prints it, from alex/terminal, with the CLI reply line",
-      "summarise the open PRs" in heard and 'from="alex/terminal"' in heard and "reason-network send alex/terminal --from alex/bot" in heard, heard)
+      "summarise the open PRs" in heard and 'from="alex/terminal"' in heard and "oan send alex/terminal --from alex/bot" in heard, heard)
 out = run("send", "alex/terminal", "--from", "alex/bot", "two PRs open, both green")
 check("after listen exits, the bot can still send with --from", "alex/terminal" in out and "refused" not in out, out)
 out = run("listen", "--as", "terminal", "--wait", "3")
-check("the terminal reads the reply with `reason network listen --as terminal`", "both green" in out and 'from="alex/bot"' in out, out)
+check("the terminal reads the reply with `oan listen --as terminal`", "both green" in out and 'from="alex/bot"' in out, out)
 out = run("listen", "--as", "terminal", "--wait", "0")
 check("…once", "No messages." in out, out)
 out = run("send", "alex/bot", "")
 check("an empty message is an error", "empty message" in out, out)
-r = subprocess.run([BIN, "send", "alex/bot", "from a shell Reason Network doesn't know"], env=dict(env, CLAUDECODE="1", CLAUDE_CODE_SESSION_ID="not-on-Reason Network"),
+r = subprocess.run([BIN, "send", "alex/bot", "from a shell Open Agent Network doesn't know"], env=dict(env, CLAUDECODE="1", CLAUDE_CODE_SESSION_ID="not-on-Open Agent Network"),
                    capture_output=True, text=True, timeout=30)
 out = run("listen", "--as", "bot", "--wait", "3")
-check("an agent shell Reason Network doesn't know sends as <me>/terminal", 'from="alex/terminal"' in out and "a shell Reason Network doesn't know" in out, r.stdout + r.stderr + out)
+check("an agent shell Open Agent Network doesn't know sends as <me>/terminal", 'from="alex/terminal"' in out and "a shell Open Agent Network doesn't know" in out, r.stdout + r.stderr + out)
 
-# Reason: its agent runs in the cloud; Reason Network lists the live sessions and sends with its CLI.
-fake_reason, reason_log = os.path.join(D, "fake-reason.sh"), os.path.join(D, "reason.log")
-listing = {"items": [
-    {"session_id": "r-1", "status": "running", "title": "Fix flaky billing test", "repo": None, "branch": "reason/task-r1", "finished_at": None, "is_archived": False},
-    {"session_id": "r-2", "status": "exit", "title": "Something finished", "finished_at": "2026-10-01T00:00:00Z", "is_archived": False},
-]}
-fail_next = os.path.join(D, "reason-fail-next")
-with open(fake_reason, "w") as f:
-    f.write(f"""#!/bin/sh
-if [ "$1 $2" = "session list" ]; then echo '{json.dumps(listing)}'; exit 0; fi
-if [ -f {fail_next} ]; then rm {fail_next}; echo "not signed in" >&2; exit 1; fi
-printf '%s\\n' "$*" >> {reason_log}
-""")
-os.chmod(fake_reason, 0o755)
-cfg = os.path.join(env["REASON_NETWORK_HOME"], "config.toml")
-with open(cfg) as f:
-    text = f.read()
-with open(cfg, "w") as f:
-    f.write(text.replace("reason = false", "reason = true"))
-env["REASON_NETWORK_REASON_BIN"] = fake_reason
-run("stop")
-run("who")
-time.sleep(2)
-out = run("who")
-check("live Reason sessions are listed with their title, finished ones aren't",
-      "fix-flaky-billing-reason" in out and "↳ Fix flaky billing test" in out and "Something finished" not in out, out)
-out = run("send", "fix-flaky-billing-reason", "reason: the billing test is flaky on main too")
-time.sleep(1)
-sent = open(reason_log).read() if os.path.exists(reason_log) else ""
-check("messages go in with `reason session send`", "queued into the Reason session" in out and sent.startswith("session send r-1 --message") and "flaky on main too" in sent, out + sent)
-check("…telling it how to reply with the CLI", "reason-network send alex/terminal --from alex/fix-flaky-billing-reason" in sent, sent)
-run("send", "alex/terminal", "--from", "alex/fix-flaky-billing-reason", "found it: a timezone bug")
-out = run("listen", "--as", "terminal", "--wait", "3")
-check("its reply comes from the Reason session", 'from="alex/fix-flaky-billing-reason"' in out and "timezone bug" in out, out)
-open(fail_next, "w").close()
-out = run("send", "fix-flaky-billing-reason", "reason: second try needed")
-time.sleep(1.5)
-first = open(reason_log).read().count("second try needed")
-deadline = time.time() + 45
-while time.time() < deadline and open(reason_log).read().count("second try needed") == 0:
-    time.sleep(1)
-check("a Reason push that fails is retried at a later sync", first == 0 and open(reason_log).read().count("second try needed") == 1,
-      f"first={first} log={open(reason_log).read()[-300:]}")
-
-# A Claude session that was open before Reason Network was set up: no restart needed. It's on the team at once, gets
+# A Claude session that was open before Open Agent Network was set up: no restart needed. It's on the team at once, gets
 # messages through its own socket, and replies with the CLI.
 old_proj = os.path.join(D, "old-proj")
 os.makedirs(old_proj)
@@ -214,7 +170,7 @@ out = run("send", "old-proj-claude", "old session: can you hear me?")
 time.sleep(1.5)
 frame = "".join(got)
 check("…it's delivered straight into the session", "delivered into the session" in out and "can you hear me?" in frame, out + frame)
-check("…with how to reply using the CLI", "reason-network send alex/terminal --from alex/old-proj-claude" in frame, frame)
+check("…with how to reply using the CLI", "oan send alex/terminal --from alex/old-proj-claude" in frame, frame)
 r = subprocess.run([BIN, "send", "alex/terminal", "loud and clear"], env=dict(env, CLAUDE_CODE_SESSION_ID="old-1", CLAUDECODE="1"),
                    capture_output=True, text=True, timeout=30)
 out = run("listen", "--as", "terminal", "--wait", "3")
@@ -260,14 +216,14 @@ time.sleep(3)
 zombies = subprocess.run(["ps", "-axo", "ppid=,stat="], capture_output=True, text=True).stdout.split("\n")
 mine = [z for z in zombies if z.split() and z.split()[0] == str(mcp.pid) and "Z" in z.split()[1]]
 check("an MCP server collects no zombies across daemon restarts", not mine, f"{len(mine)} zombies")
-starts = open(os.path.join(env["REASON_NETWORK_HOME"], "daemon.log")).read().count("already running")
+starts = open(os.path.join(env["OAN_HOME"], "daemon.log")).read().count("already running")
 check("…and doesn't race to start daemons", starts <= 3, f"{starts} duplicate starts")
 mcp.kill()
 
 # The daemon being down never breaks the agent.
 run("stop")
-bad = dict(env, REASON_NETWORK_HOME="/nonexistent/dir/that/cannot/exist")
+bad = dict(env, OAN_HOME="/nonexistent/dir/that/cannot/exist")
 r = subprocess.run([BIN, "hook", "codex", "post-tool-use"], env=bad, input='{"session_id":"x"}', capture_output=True, text=True, timeout=20)
-check("hook exits 0 and prints nothing when Reason Network is broken", r.returncode == 0 and r.stdout == "", f"{r.returncode} {r.stdout!r}")
+check("hook exits 0 and prints nothing when Open Agent Network is broken", r.returncode == 0 and r.stdout == "", f"{r.returncode} {r.stdout!r}")
 print(f"\n{sum(results)}/{len(results)} hook checks passed")
 raise SystemExit(0 if all(results) else 1)
