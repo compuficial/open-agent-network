@@ -1,7 +1,8 @@
 # Run a relay
 
-Open Agent Network will not start a team without a relay you control. The relay forwards encrypted QUIC.
-It cannot read messages. Every teammate must reach the same URL.
+Open Agent Network will not start a team without a relay. By default that relay is one you run.
+`oan init --community` opts into the public list instead. The relay forwards encrypted QUIC. It cannot
+read messages. Every teammate must reach the same relay, or the same set when more than one is configured.
 
 ## What to open
 
@@ -35,6 +36,18 @@ Then:
 oan init my-team --as alice --relay https://relay.example.com
 ```
 
+Cap how much one client can send. `iroh-relay` enforces `[limits.client.rx]` (a token bucket on bytes
+read from each client). Its connection-accept limits are not implemented, so leave them unset. Put
+this in the file you pass as `--config-path`, next to the bind addresses:
+
+```toml
+[limits.client.rx]
+bytes_per_second = 1048576
+max_burst_bytes = 4194304
+```
+
+That is 1 MiB/s sustained and a 4 MiB burst. Raise it if the team moves larger files through the relay.
+
 Limit who can connect, if you want, with `iroh-relay`'s access controls to the roster's endpoint ids
 (`oan team --json` lists them). The URL must be `https://` in production. `oan` refuses hostnames under
 `reasonmachines.com`, `n0.iroh.link`, and `n0.computer`.
@@ -62,6 +75,7 @@ The template sets the service. This table is the source of truth:
 | Public port | 443 at Railway's edge. Do not publish UDP. |
 | Container port | The `PORT` Railway injects. The process binds it. Leave `PORT` unset in the variables UI. |
 | Required variables | None. `PORT` is injected. `RUST_LOG` is optional and only changes `iroh-relay` logs. |
+| Rate limit | On. `OAN_RELAY_RX_BYTES_PER_SEC` (default `1048576`) and `OAN_RELAY_RX_BURST_BYTES` (default `4194304`). |
 
 `railway.json` and `railway.toml` in that directory still describe the image, and the tests read them.
 Railway did not pick those files up when they were set as the config-file path. Railway is moving that
@@ -84,3 +98,40 @@ proxy, and two `oan` daemons using the `https://` URL. It is not part of CI.
 
 `oan` accepts `http://127.0.0.1` and RFC1918 addresses for a lab. `tests/relay_pair.rs` starts
 `iroh-relay` in `--dev` mode on a loopback port and runs two daemons against it.
+
+## Host a community relay
+
+A community relay is a normal relay whose URL is listed in `relays.json` at the root of this
+repository. Teams do not use that list unless someone passes `--community`. The default is still a
+relay the team runs itself.
+
+1. Deploy one. The Railway template is
+   [https://railway.com/deploy/open-agent-network-relay](https://railway.com/deploy/open-agent-network-relay).
+   A VM from the section above is fine too. The process must answer `GET /healthz` with HTTP 200 on
+   the same `https://` origin teammates will use.
+2. Leave the per-client receive limit on. The Railway image sets 1 MiB/s and a 4 MiB burst. Override
+   those with `OAN_RELAY_RX_BYTES_PER_SEC` and `OAN_RELAY_RX_BURST_BYTES` if you need to. The VM
+   config above is the same limit.
+3. Open a pull request that adds one object to the `relays` array. Copy the fields from
+   `relays.schema.json`: `url`, `operator`, `github` (your handle), `region`, `added` (`YYYY-MM-DD`),
+   and optional `notes`. The URL has to be `https://`. Hosts this project refuses (`reasonmachines.com`,
+   `n0.iroh.link`, `n0.computer`, and other `iroh.link` names) are rejected here too.
+4. CI fetches `GET /healthz` for every URL the pull request adds. A failure blocks the merge. After
+   it is on `main`, a nightly job checks every entry. Three failed nights in a row open a pull request
+   that removes that entry.
+
+What you can see: source IP addresses, iroh endpoint ids, and when connections open and close. What
+you cannot see: message contents. The relay forwards ciphertext.
+
+Someone who wants this list runs:
+
+```sh
+oan init my-team --as alice --community
+oan relay --community
+```
+
+`oan` downloads `relays.json` from the raw file on `main` (or `OAN_COMMUNITY_RELAYS_URL`), skips
+anything that fails the same host checks, times `GET /healthz`, and keeps the fastest three. Those
+three are the team's relay set, so iroh can fail over from one to another. The command prints the
+operator and GitHub handle of each one before it saves them. An empty list is an error. `--relay`
+and `--community` cannot be combined.

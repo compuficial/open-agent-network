@@ -142,10 +142,14 @@ pub struct Net {
 pub async fn bind(key: SecretKey, relay: Option<&str>, lan: bool) -> Result<Endpoint> {
     // The team's own relay only: no public preset, no address publishing, no address lookup.
     debug_assert!(default_relays().is_empty());
-    let url = crate::fork::require_relay(relay)?;
-    let url: RelayUrl =
-        url.parse().map_err(|_| anyhow!("not a relay url: {url} (expected e.g. https://relay.example.com)"))?;
-    let mut b = Endpoint::builder(presets::Minimal).secret_key(key.clone()).relay_mode(RelayMode::custom([url]));
+    let urls = crate::fork::relay_urls(relay)?;
+    let mut parsed = Vec::with_capacity(urls.len());
+    for url in &urls {
+        parsed.push(
+            url.parse().map_err(|_| anyhow!("not a relay url: {url} (expected e.g. https://relay.example.com)"))?,
+        );
+    }
+    let mut b = Endpoint::builder(presets::Minimal).secret_key(key.clone()).relay_mode(RelayMode::custom(parsed));
     b = with_relay_ca(b)?;
     if lan {
         b = b.address_lookup(NoRelays(MdnsAddressLookup::builder().build(key.public())?));
@@ -183,6 +187,11 @@ fn pem_certs(bytes: &[u8]) -> Result<Vec<rustls_pki_types::CertificateDer<'stati
         bail!("OAN_RELAY_CA contained no certificates");
     }
     Ok(certs)
+}
+
+fn parse_relay_urls(relay: Option<&str>) -> Vec<RelayUrl> {
+    let Ok(urls) = crate::fork::relay_urls(relay) else { return Vec::new() };
+    urls.into_iter().filter_map(|url| url.parse().ok()).collect()
 }
 
 /// Makes sure this machine reaches `url` as a relay. A mistyped or unreachable relay would cut the team off.
@@ -418,7 +427,7 @@ impl Net {
             )),
             invites: Default::default(),
             endpoint,
-            relays: relay.and_then(|u| u.parse().ok()).into_iter().collect(),
+            relays: parse_relay_urls(relay),
             daemon: Arc::downgrade(daemon),
             links: Default::default(),
             remote: Mutex::new(remote),

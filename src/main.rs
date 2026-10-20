@@ -2,6 +2,7 @@
 mod agent;
 mod claude;
 mod client;
+mod community;
 mod config;
 mod daemon;
 mod doing;
@@ -165,8 +166,11 @@ enum Cmd {
         #[arg(long)]
         no_setup: bool,
         /// Your own iroh relay, from the start (see `relay`)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "community")]
         relay: Option<String>,
+        /// Opt in to the public community relay list. The default is a relay you run.
+        #[arg(long, conflicts_with = "relay")]
+        community: bool,
         /// This machine's sign-in proof: your name is then the one it gives
         #[arg(long)]
         proof: Option<String>,
@@ -227,7 +231,14 @@ enum Cmd {
         force: bool,
     },
     /// Point the team at a self-hosted iroh relay every member can reach
-    Relay { url: String },
+    Relay {
+        /// Self-hosted relay URL. Required unless `--community`.
+        #[arg(required_unless_present = "community", conflicts_with = "community")]
+        url: Option<String>,
+        /// Opt in to the public community relay list. The default is a relay you run.
+        #[arg(long)]
+        community: bool,
+    },
     /// List messages waiting for your approval (when `inbound` is `hold`)
     Held,
     /// Deliver held messages
@@ -441,7 +452,9 @@ async fn cli(cmd: Cmd) -> Result<()> {
             let r: Registered = link.call(Request::SetStatus { key, doing, name }).await?;
             println!("You are {}.", r.address);
         }
-        Cmd::Init { team, person, no_setup: false, relay: None, proof: None, json: false } if wizard::interactive() => {
+        Cmd::Init { team, person, no_setup: false, relay: None, community: false, proof: None, json: false }
+            if wizard::interactive() =>
+        {
             wizard::guided(wizard::onboard(Some(true), team, None, person)).await?
         }
         Cmd::Join { invite, person, no_setup: false, proof: None, json: false } if wizard::interactive() => {
@@ -463,10 +476,11 @@ async fn cli(cmd: Cmd) -> Result<()> {
         Cmd::Setup { dry_run: false, remove: false, no_service: false } if wizard::interactive() => {
             wizard::guided(wizard::setup_agents()).await?
         }
-        Cmd::Init { team, person, no_setup, relay, proof, json } => {
+        Cmd::Init { team, person, no_setup, relay, community, proof, json } => {
             let Some(team) = team else {
                 bail!("name the team: `{CLI} init <team>` (or run it in a terminal to be asked)")
             };
+            let relay = if community { Some(community::choose(json).await?) } else { relay };
             let req = Request::CreateTeam { name: team, person: default_person(person), relay, proof };
             let t: TeamInfo = link.call(req).await?;
             wait_exit(daemon_pid()).await;
@@ -579,7 +593,8 @@ async fn cli(cmd: Cmd) -> Result<()> {
             println!("{}", link.call::<String>(Request::Leave { force }).await?);
             wait_exit(daemon_pid()).await;
         }
-        Cmd::Relay { url } => {
+        Cmd::Relay { url, community } => {
+            let url = if community { community::choose(false).await? } else { url.unwrap_or_default() };
             if url.eq_ignore_ascii_case("default") {
                 bail!("there is no default relay; pass your self-hosted relay url");
             }

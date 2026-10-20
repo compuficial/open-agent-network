@@ -52,9 +52,10 @@ impl Daemon {
 
     pub(super) async fn start_net(self: &Arc<Self>) -> Result<()> {
         let team = self.team_state().ok_or_else(|| anyhow!("not in a team"))?;
-        let relay = crate::fork::require_relay(team.meta.body.relay.as_deref())
-            .map_err(|e| anyhow!("{e}. Run `{CLI} relay <url>` to set a self-hosted relay."))?;
-        let endpoint = net::bind(self.key.clone(), Some(relay), self.cfg.lan()).await?;
+        let relay = crate::fork::relay_urls(team.meta.body.relay.as_deref())
+            .map_err(|e| anyhow!("{e}. Run `{CLI} relay <url>` to set a self-hosted relay."))?
+            .join(" ");
+        let endpoint = net::bind(self.key.clone(), Some(&relay), self.cfg.lan()).await?;
         // Last known presence of each machine, so `who --all` shows offline teammates after a restart.
         let mut remote = HashMap::new();
         {
@@ -69,7 +70,7 @@ impl Daemon {
                 }
             }
         }
-        let net = Net::start(self, endpoint, Some(relay), remote);
+        let net = Net::start(self, endpoint, Some(&relay), remote);
         log(&format!("team {} · machine {}", team.name(), net.id().fmt_short()));
         *self.net.write().unwrap() = Some(net.clone());
         // Invite codes made here that are still good: listen for them again.
@@ -83,7 +84,7 @@ impl Daemon {
         };
         for (code, expires) in codes {
             if team.invite_unused(&invite::secret(&code)) {
-                net.listen_invite(invite::key(&code), expires, Some(relay), self.cfg.lan()).await?;
+                net.listen_invite(invite::key(&code), expires, Some(&relay), self.cfg.lan()).await?;
             } else {
                 self.inner.lock().unwrap().store.delete_prefix(&format!("code:{code}"))?;
             }
@@ -204,7 +205,7 @@ impl Daemon {
             state.attest(&self.key.public(), p);
         }
         let relay_url = relay.or_else(|| crate::paths::env_var("RELAY").ok());
-        let relay_url = crate::fork::require_relay(relay_url.as_deref())?.to_string();
+        let relay_url = crate::fork::relay_urls(relay_url.as_deref())?.join(" ");
         net::check_relay(self.key.clone(), &relay_url).await?;
         state.set_relay(&self.key, Some(relay_url.clone()));
         {
@@ -275,9 +276,9 @@ impl Daemon {
         }
         let (team, secret, relay, peers) = if Ticket::is_ticket(invite_text) {
             let t = Ticket::decode(invite_text)?;
-            let relay = crate::fork::require_relay(t.relay.as_deref())
+            let relay = crate::fork::relay_urls(t.relay.as_deref())
                 .map_err(|_| anyhow!("this team isn't self-hosted; the link must name your relay"))?
-                .to_string();
+                .join(" ");
             let addrs = t.addrs();
             (t.team, t.secret, relay, addrs)
         } else {
@@ -594,10 +595,11 @@ impl Daemon {
     }
 
     pub(super) async fn set_relay(self: &Arc<Self>, url: Option<String>) -> Result<String> {
-        let url = Some(crate::fork::require_relay(url.as_deref())?.to_string());
-        if let Some(u) = &url {
-            net::check_relay(self.key.clone(), u).await?;
-        }
+        let urls = crate::fork::relay_urls(url.as_deref())?;
+        let shown = urls.join(", ");
+        let stored = urls.join(" ");
+        net::check_relay(self.key.clone(), &stored).await?;
+        let url = Some(stored);
         let state = {
             let mut g = self.inner.lock().unwrap();
             let team = g.team.as_mut().ok_or_else(|| anyhow!("not in a team"))?;
@@ -619,7 +621,8 @@ impl Daemon {
         }
         self.restart_soon();
         let u = url.clone().unwrap_or_default();
-        let (now, cmd) = (format!("The team now uses relay {u}."), format!("{CLI} relay {u}"));
+        let cmd = if urls.len() > 1 { format!("{CLI} relay --community") } else { format!("{CLI} relay {u}") };
+        let now = format!("The team now uses relay {shown}.");
         let mut out = format!("{now} Team links from before stop working: `{CLI} link` shows the new one.");
         // A machine that is off can't hear about it, and won't find the team where it looks when it's back.
         if !away.is_empty() {
