@@ -30,20 +30,39 @@ fn allowed(path: &str, needle: &str) -> bool {
     false
 }
 
+fn readme_attribution(text: &str) -> Result<(), String> {
+    // A Windows checkout may have rewritten the file with CRLF.
+    let text = text.replace("\r\n", "\n");
+    let Some((body, tail)) = text.rsplit_once("\n## License\n") else {
+        return Err("README needs a License section for the Apache-2.0 attribution".into());
+    };
+    for needle in NEEDLES {
+        if body.contains(needle) {
+            return Err(format!("README above the License section contains {needle}"));
+        }
+    }
+    if !tail.contains("https://github.com/reason-machines/reason-network") || !tail.contains("v0.12.0") {
+        return Err(format!("README license section is missing the upstream attribution:\n{tail}"));
+    }
+    for needle in ["Reason Network", "Reason Machines", "reasonmachines.com"] {
+        if tail.contains(needle) {
+            return Err(format!("README license section contains {needle}"));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn readme_names_the_upstream_repo_only_in_the_license_section() {
     let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md")).unwrap();
-    let Some((body, tail)) = text.rsplit_once("\n## License\n") else {
-        panic!("README needs a License section for the Apache-2.0 attribution");
-    };
-    for needle in NEEDLES {
-        assert!(!body.contains(needle), "README above the License section contains {needle}");
-    }
-    assert!(tail.contains("https://github.com/reason-machines/reason-network"), "{tail}");
-    assert!(tail.contains("v0.12.0"), "{tail}");
-    for needle in ["Reason Network", "Reason Machines", "reasonmachines.com"] {
-        assert!(!tail.contains(needle), "README license section contains {needle}");
-    }
+    readme_attribution(&text).unwrap();
+}
+
+#[test]
+fn readme_attribution_accepts_windows_newlines() {
+    let sample = "Welcome to the Open Agent Network.\r\n\r\n## License\r\n\r\n\
+        Fork of https://github.com/reason-machines/reason-network v0.12.0.\r\n";
+    readme_attribution(sample).unwrap();
 }
 
 #[test]
