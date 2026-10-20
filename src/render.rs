@@ -211,6 +211,11 @@ pub fn team(t: &TeamInfo) -> String {
     let now = util::now_ms();
     let mut out = String::new();
     let relay = t.relay.clone().unwrap_or_else(default_relays);
+    let relay = if relay.contains("://") && relay.split_whitespace().nth(1).is_some() {
+        relay.split_whitespace().collect::<Vec<_>>().join(", ")
+    } else {
+        relay
+    };
     let _ = writeln!(out, "team {} · relay: {relay}", t.name);
     let pw = t.machines.iter().map(|m| person(m).chars().count()).max().unwrap_or(0);
     let mw = t.machines.iter().map(|m| m.machine.chars().count()).max().unwrap_or(0);
@@ -419,6 +424,8 @@ mod tests {
         assert_eq!(team(&t), "team vibes · relay: not set\n");
         t.relay = Some("https://relay.example.com".into());
         assert_eq!(team(&t), "team vibes · relay: https://relay.example.com\n");
+        t.relay = Some("https://a.example https://b.example".into());
+        assert_eq!(team(&t), "team vibes · relay: https://a.example, https://b.example\n");
     }
 
     #[test]

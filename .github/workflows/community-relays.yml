@@ -1,0 +1,57 @@
+name: community-relays
+
+on:
+  schedule:
+    # 06:17 UTC. Three failed nights in a row remove an entry.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  health:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: relay-health
+          key: community-relay-health-${{ github.run_id }}
+          restore-keys: community-relay-health-
+      - id: audit
+        run: |
+          set +e
+          python3 .github/scripts/community_relays.py nightly --relays relays.json --state relay-health/state.json > "$RUNNER_TEMP/summary.txt"
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 2 ]; then
+            echo "removed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$code" -eq 0 ]; then
+            echo "removed=false" >> "$GITHUB_OUTPUT"
+          else
+            exit "$code"
+          fi
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always() && steps.audit.outputs.code != ''
+        with:
+          path: relay-health
+          key: community-relay-health-${{ github.run_id }}
+      - name: Open a pull request removing failed relays
+        if: steps.audit.outputs.removed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "oan-relay-health"
+          git config user.email "oan-relay-health@users.noreply.github.com"
+          branch="community-relay-drop-${{ github.run_id }}"
+          git checkout -b "$branch"
+          git add relays.json
+          git commit -m "Remove community relays that failed 3 health checks"
+          git push origin "HEAD:$branch"
+          gh pr create --base main --head "$branch" --title "Remove community relays that failed health checks" --body-file "$RUNNER_TEMP/summary.txt"

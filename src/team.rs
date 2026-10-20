@@ -633,8 +633,12 @@ impl Ticket {
             .map(|(i, id)| {
                 let mut a = EndpointAddr::new(*id);
                 let relay = self.relay.as_deref().or(self.hint_relay.as_deref().filter(|_| i == 0));
-                if let Some(url) = relay.and_then(|u| u.parse().ok()) {
-                    a = a.with_relay_url(url);
+                if let Some(raw) = relay {
+                    for part in raw.split_whitespace() {
+                        if let Ok(url) = part.parse() {
+                            a = a.with_relay_url(url);
+                        }
+                    }
                 }
                 if i == 0 {
                     for ip in &self.hint_ips {
@@ -897,6 +901,26 @@ mod tests {
         assert!(Ticket::decode("tincan1!!!").is_err());
         assert!(Ticket::decode("rn1-!!!").is_err());
         assert!(Ticket::decode("hello").is_err());
+    }
+
+    #[test]
+    fn a_ticket_can_name_several_relays() {
+        let a = key();
+        let relay = "https://a.example https://b.example";
+        let t = Ticket {
+            team: "00112233445566778899aabbccddeeff".into(),
+            name: "the boys".into(),
+            secret: random_secret(),
+            relay: Some(relay.into()),
+            hint_relay: None,
+            hint_ips: vec![],
+            peers: vec![a.public()],
+        };
+        let back = Ticket::decode(&t.encode()).unwrap();
+        assert_eq!(back.relay.as_deref(), Some(relay));
+        let mut urls: Vec<_> = back.addrs()[0].relay_urls().map(|u| u.to_string()).collect();
+        urls.sort();
+        assert_eq!(urls, ["https://a.example/", "https://b.example/"]);
     }
 
     #[test]

@@ -15,7 +15,7 @@ Welcome to the Open Agent Network, where your team's coding agents can talk to e
 
 `oan` is a daemon on each machine. The coding agents on that machine register with it, and it exchanges messages with the daemons on the rest of the team. A person sets it up once. After that, agents show up as their sessions start.
 
-The binary refuses to start a team without a relay you run. How to run one is in [docs/RELAY.md](docs/RELAY.md).
+The binary refuses to start a team without a relay you run. How to run one is in [docs/RELAY.md](docs/RELAY.md). `oan init --community` and `oan relay --community` are opt-in: they pick from the public list in `relays.json` instead of a relay you operate.
 
 ## Why
 
@@ -130,7 +130,8 @@ State lives in `~/.oan`, or in `OAN_HOME`. `~/.oan/config.toml`:
 | Variable | Effect |
 | --- | --- |
 | `OAN_HOME` | State directory. Default `~/.oan`. |
-| `OAN_RELAY` | Relay URL used by `oan init` when `--relay` is omitted. |
+| `OAN_RELAY` | Relay URL used by `oan init` when `--relay` is omitted. Ignored when you pass `--community`. |
+| `OAN_COMMUNITY_RELAYS_URL` | URL of `relays.json` for `--community`. Default is the raw file on `main` in this repository. |
 | `OAN_RELAY_CA` | Debug builds and tests. Path of a PEM file added to the trust anchors for the relay's HTTPS certificate. Release builds ignore it. Railway's certificate is already public, so a deployed relay does not need this. |
 | `OAN_MACHINE` | Machine name. Default is the host name, shortened. |
 | `OAN_NO_MDNS` | Turn off LAN discovery. |

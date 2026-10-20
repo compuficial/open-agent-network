@@ -40,6 +40,11 @@ fn the_image_pins_the_iroh_release_and_stays_http_only() {
         "enable_quic_addr_discovery = false",
         "enable_metrics = false",
         "http_bind_addr = \"0.0.0.0:${port}\"",
+        "[limits.client.rx]",
+        "bytes_per_second = ${rx}",
+        "max_burst_bytes = ${burst}",
+        "OAN_RELAY_RX_BYTES_PER_SEC:-1048576",
+        "OAN_RELAY_RX_BURST_BYTES:-4194304",
     ] {
         assert!(entry.contains(line), "entrypoint missing {line}");
     }

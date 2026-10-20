@@ -55,6 +55,20 @@ pub fn require_relay(relay: Option<&str>) -> Result<&str> {
     Ok(url)
 }
 
+/// One stored relay string may name several URLs, separated by whitespace, so a community set can fail over.
+/// Each URL is held to the same rules as a single self-hosted relay.
+pub fn relay_urls(relay: Option<&str>) -> Result<Vec<String>> {
+    let raw = require_relay(relay)?;
+    let mut out = Vec::new();
+    for part in raw.split_whitespace() {
+        out.push(require_relay(Some(part))?.to_string());
+    }
+    if out.is_empty() {
+        bail!("relay url is empty");
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +94,13 @@ mod tests {
         assert!(require_relay(Some("https://relay.example.com")).is_ok());
         assert!(require_relay(Some("http://127.0.0.1:3340")).is_ok());
         assert!(require_relay(Some("http://relay.example.com")).is_err());
+    }
+
+    #[test]
+    fn several_relay_urls_are_checked_one_by_one() {
+        let urls = relay_urls(Some("https://a.example https://b.example")).unwrap();
+        assert_eq!(urls, ["https://a.example", "https://b.example"]);
+        assert!(relay_urls(Some("https://a.example https://use1-1.relay.n0.iroh.link")).is_err());
+        assert!(relay_urls(Some("https://a.example http://relay.example")).is_err());
     }
 }

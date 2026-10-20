@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/compuficial/open-agent-network/blob/main/relays.schema.json",
+  "title": "Open Agent Network community relays",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["relays"],
+  "properties": {
+    "relays": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url", "operator", "github", "region", "added"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "pattern": "^https://",
+            "description": "HTTPS origin of the relay. GET /healthz must return 200."
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the person or organization that runs this relay."
+          },
+          "github": {
+            "type": "string",
+            "minLength": 1,
+            "description": "GitHub handle of the operator, without a leading @."
+          },
+          "region": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Where the relay runs, such as us-east or eu-central."
+          },
+          "added": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "The day this entry was added, YYYY-MM-DD."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Optional note for other operators."
+          }
+        }
+      }
+    }
+  }
+}
